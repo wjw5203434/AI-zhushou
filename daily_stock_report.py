@@ -7,15 +7,20 @@ import requests
 # 第一步：获取行情数据
 # ==========================================
 def get_market_data():
-    # 获取上证指数实时数据
-    df = ak.stock_zh_index_spot_em(symbol="上证系列指数")
-    # 筛选出需要的列
-    df = df[["代码", "名称", "最新价", "涨跌幅"]]
+    try:
+        # 优先尝试东方财富接口（最快，但可能会屏蔽海外IP）
+        print("尝试使用东方财富接口获取数据...")
+        df = ak.stock_zh_index_spot_em(symbol="上证系列指数")
+        df = df[["代码", "名称", "最新价", "涨跌幅"]]
+    except Exception as e:
+        # 如果东方财富接口失败了，自动切换成新浪财经接口
+        print(f"东方财富接口失败: {e}")
+        print("正在切换为新浪财经接口...")
+        df = ak.stock_zh_index_spot_sina()
+        # 提取需要的列，保证和东方财富的格式一样
+        df = df[["代码", "名称", "最新价", "涨跌幅"]]
+    
     return df
-
-# ==========================================
-# 第二步：组装HTML报告（截图里没写代码，但逻辑在这里）
-# ==========================================
 def build_html_report(df):
     # 提取日期
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
