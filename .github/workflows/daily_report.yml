@@ -1,0 +1,27 @@
+name: Daily Stock Report
+
+on:
+  schedule:
+    # 每天北京时间 8:00 运行 (UTC时间 0:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 允许手动点击运行测试
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行脚本
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python daily_stock_report.py
