@@ -41,8 +41,7 @@ def build_html_report(news_list):
     <ul style='line-height:1.8;'>{html_items}</ul>
     <p style='color:gray;font-size:12px;'>此消息由AI助手自动生成，仅供参考。</p>
     """
-    return html_contentreturn html_content
-
+    return html_content
 # ==========================================
 # 第三步：调用PushPlus推送
 # ==========================================
