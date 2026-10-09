@@ -2,9 +2,9 @@ name: Daily Stock Report
 
 on:
   schedule:
-    # 每天北京时间 8:00 运行 (UTC时间 0:00)
-    cron: '0 23 * * *'
-  workflow_dispatch:  # 允许手动点击运行测试
+    # 每天北京时间 7:00 运行 (UTC时间 23:00)
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
