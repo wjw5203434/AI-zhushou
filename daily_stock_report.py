@@ -6,48 +6,42 @@ import requests
 # ==========================================
 # 第一步：获取行情数据
 # ==========================================
-def get_market_data():
+def get_finance_news():
+    """获取宏观政策与科技巨头相关新闻"""
+    news_list = []
+    
     try:
-        # 优先尝试东方财富接口
-        print("尝试使用东方财富接口获取数据...")
-        df = ak.stock_zh_index_spot_em(symbol="上证系列指数")
+        # 1. 百度经济新闻（宏观政策方向）
+        print("正在获取百度经济新闻...")
+        df_econ = ak.news_economic_baidu()
+        for _, row in df_econ.head(8).iterrows():
+            news_list.append(f"【宏观】{row.get('标题', '')} — {row.get('摘要', '')[:80]}")
     except Exception as e:
-        # 失败则切换新浪财经接口
-        print(f"东方财富接口失败: {e}")
-        print("正在切换为新浪财经接口...")
-        df = ak.stock_zh_index_spot_sina()
+        print(f"百度经济新闻获取失败: {e}")
     
-    # 筛选需要的列
-    df = df[["代码", "名称", "最新价", "涨跌幅"]]
+    try:
+        # 2. 央视新闻（国内政策方向）
+        print("正在获取央视新闻...")
+        df_cctv = ak.news_cctv()
+        for _, row in df_cctv.head(5).iterrows():
+            news_list.append(f"【政策】{row.get('title', '')} — {row.get('content', '')[:80]}")
+    except Exception as e:
+        print(f"央视新闻获取失败: {e}")
     
-    # ⭐ 关键修改：只保留几个核心指数（防止内容过长被PushPlus拒收）
-    # 这里筛选你想要的指数代码，比如上证指数(000001)、深证成指(399001)、创业板指(399006)等
-    # 注意：不同接口的代码前缀可能不同，用"包含"匹配最稳妥
-    target_names = ["上证指数", "深证成指", "创业板指", "科创50", "沪深300"]
-    df = df[df["名称"].isin(target_names)] 
+    # 兜底：如果两个源都失败，给一条提示
+    if not news_list:
+        news_list.append("今日新闻源暂时不可用，请检查数据接口。")
     
-    # 如果过滤后没数据（可能名称对不上），就只取前5行兜底
-    if df.empty:
-        df = df.head(5)
-
-    return df
-def build_html_report(df):
-    # 提取日期
+    return news_list
+def build_html_report(news_list):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
-    
-    # 把DataFrame转换成HTML表格，并加上简单的红绿颜色样式
-    html_table = df.to_html(index=False, border=0, justify='center')
-    
-    # 给涨跌幅加上颜色（简单粗暴的字符串替换法，也可用更复杂的CSS）
-    # 因为PushPlus的HTML模板支持内联样式
+    html_items = "".join(f"<li style='margin-bottom:10px;'>{item}</li>" for item in news_list)
     html_content = f"""
-    <h3>📊 {today} 股市早报</h3>
-    <p>以下是今日主要指数行情：</p>
-    {html_table}
-    <br>
-    <p style="color:gray;font-size:12px;">此消息由AI助手自动生成，仅供参考。</p>
+    <h3>📰 {today} 关键信息链</h3>
+    <ul style='line-height:1.8;'>{html_items}</ul>
+    <p style='color:gray;font-size:12px;'>此消息由AI助手自动生成，仅供参考。</p>
     """
-    return html_content
+    return html_contentreturn html_content
 
 # ==========================================
 # 第三步：调用PushPlus推送
