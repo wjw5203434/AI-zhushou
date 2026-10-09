@@ -59,23 +59,38 @@ def send_to_wechat(token, title, content):
 # ==========================================
 # 主程序入口：按顺序执行
 # ==========================================
+# ==========================================
+# 主程序入口：按顺序执行
+# ==========================================
 if __name__ == "__main__":
-    # 1. 获取数据
-    print("正在获取数据...")
-    df = get_market_data()
-    
-    # 2. 组装报告
-    print("正在生成报告...")
-    title = "今日股市早报"
-    content = build_html_report(df)
-    
-    # 3. 从环境变量中读取 Token（千万不要写死在代码里）
-    # 这里对应你在 GitHub Secrets 里设置的 PUSHPLUS_TOKEN
-    token = os.environ.get("PUSHPLUS_TOKEN") 
-    
-    if not token:
-        print("错误：未找到 PUSHPLUS_TOKEN 环境变量！")
-    else:
+    try:
+        # 1. 获取新闻数据（注意这里改成了 get_finance_news）
+        print("正在获取宏观与科技新闻...")
+        news_list = get_finance_news()
+        
+        # 2. 组装报告
+        print("正在生成报告...")
+        title = "今日关键信息链"
+        content = build_html_report(news_list)
+        
+        # 3. 从环境变量中读取 Token
+        token = os.environ.get("PUSHPLUS_TOKEN") 
+        
+        if not token:
+            raise ValueError("错误：未找到 PUSHPLUS_TOKEN 环境变量！")
+            
         print("正在推送到微信...")
         send_to_wechat(token, title, content)
         print("执行完毕！")
+        
+    except Exception as e:
+        # 如果出错，把错误信息也推送到微信
+        import traceback
+        error_msg = traceback.format_exc()
+        print(error_msg)
+        
+        token = os.environ.get("PUSHPLUS_TOKEN")
+        if token:
+            send_to_wechat(token, "⚠️ 脚本运行报错", f"<pre>{error_msg}</pre>")
+        else:
+            print("连 token 都没取到，无法推送报错信息")
