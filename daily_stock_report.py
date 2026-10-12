@@ -225,25 +225,33 @@ def get_asia_pacific_index():
     except Exception as e:
         return f"亚太指数获取失败: {e}"
 
-
 def get_us_index():
-    """美股三大指数：多层降级方案"""
-    # 方案一：新浪财经美股指数（结构最简单）
+    """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
+    # 方案一：新浪财经美股指数（结构最稳定）
     try:
         df = ak.index_us_stock_sina()
         print("=== index_us_stock_sina 列名 ===")
         print(df.columns.tolist())
         print("=== 前5行 ===")
         print(df.head().to_string())
-        if "名称" in df.columns:
-            targets = df[df["名称"].str.contains("道琼斯|纳斯达克|标普", na=False)]
+
+        # 尝试多种可能的名称列
+        name_col = None
+        for col in ["名称", "指数名称", "name", "Name"]:
+            if col in df.columns:
+                name_col = col
+                break
+
+        if name_col:
+            targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
             if not targets.empty:
-                return "（Sina接口）\n" + targets.to_string(index=False)
-        return "（Sina接口）\n" + df.head(5).to_string(index=False)
+                return "（新浪美股接口）\n" + targets.to_string(index=False)
+
+        return "（新浪美股接口）\n" + df.head(5).to_string(index=False)
     except Exception as e:
         print(f"index_us_stock_sina 失败: {e}")
 
-    # 方案二：东方财富全球指数历史
+    # 方案二：东方财富全球指数历史（备选）
     try:
         us_names = ["道琼斯", "纳斯达克", "标普500"]
         lines = []
@@ -266,10 +274,6 @@ def get_us_index():
     except Exception as e:
         print(f"index_global_hist_em 失败: {e}")
 
-    return "美股指数数据暂不可用"
-
-    if result_lines:
-        return "\n".join(result_lines)
     return "美股指数数据暂不可用"
 
 
