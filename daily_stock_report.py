@@ -42,7 +42,13 @@ def summarize_with_ai(news_list, api_key):
         "temperature": 0.5
     }
     resp = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
-    return resp.json()["choices"][0]["message"]["content"]
+    print("DeepSeek 返回状态码:", resp.status_code)
+    print("DeepSeek 返回内容:", resp.text)  # 新增：打印完整返回内容
+
+    result = resp.json()
+    if "choices" not in result:
+        raise ValueError(f"DeepSeek 返回异常: {result}")
+    return result["choices"][0]["message"]["content"]
 def build_html_report(news_list):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
     html_items = "".join(f"<li style='margin-bottom:10px;'>{item}</li>" for item in news_list)
