@@ -42,7 +42,6 @@ def get_finance_news():
 # 二、大盘指数数据（含成交量绝对变化）
 # ==========================================
 def get_market_index():
-    """获取三大指数最新收盘数据，并显示较前日放量/缩量多少亿"""
     indices = {
         "000001": "上证指数",
         "399001": "深证成指",
@@ -67,7 +66,6 @@ def get_market_index():
                 amount = last.get("成交额", 0)
                 prev_amount = prev.get("成交额", 0)
 
-                # 成交额单位：元 → 亿元
                 amount_yi = amount / 100000000 if amount else 0
                 prev_amount_yi = prev_amount / 100000000 if prev_amount else 0
 
@@ -95,7 +93,6 @@ def get_market_index():
 # 三、资金面数据
 # ==========================================
 def get_northbound_flow():
-    """北向资金已停止披露，改用大盘主力资金流向替代"""
     try:
         df = ak.stock_market_fund_flow()
         if df is not None and not df.empty:
@@ -107,7 +104,6 @@ def get_northbound_flow():
 
 
 def get_margin_data():
-    """两融余额（上交所）"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         start = (datetime.datetime.now() - datetime.timedelta(days=10)).strftime('%Y%m%d')
@@ -118,7 +114,6 @@ def get_margin_data():
 
 
 def get_lhb_data():
-    """龙虎榜机构净买入"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         df = ak.stock_lhb_detail_em(start_date=today, end_date=today)
@@ -133,7 +128,6 @@ def get_lhb_data():
 # 四、情绪面数据
 # ==========================================
 def get_zt_pool():
-    """涨停池与跌停池统计"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         zt = ak.stock_zt_pool_em(date=today)
@@ -157,7 +151,6 @@ def get_zt_pool():
 # 五、宏观数据（取最新）
 # ==========================================
 def get_macro_data():
-    """PMI / CPI / M2（取最新数据）"""
     result = []
     try:
         pmi = ak.macro_china_pmi()
@@ -184,7 +177,6 @@ def get_macro_data():
 # 六、大宗商品
 # ==========================================
 def get_commodity_data():
-    """全球大宗商品：原油、铜、黄金"""
     try:
         df = ak.futures_global_spot_em()
         if df is not None and not df.empty:
@@ -200,8 +192,30 @@ def get_commodity_data():
 # 七、亚太与美股指数（关键修复）
 # ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI（优先实时，降级QDII）"""
-    # 方案一：实时行情接口
+    """日经225、韩国KOSPI（优先QDII亚洲指数，降级实时接口）"""
+    # 方案一：QDII亚洲指数（集思录，不受东财风控影响）
+    try:
+        df = ak.qdii_a_index_jsl()
+        print("=== qdii_a_index_jsl 列名 ===")
+        print(df.columns.tolist())
+
+        name_col = next((c for c in ["名称", "相关标的", "指数名称"] if c in df.columns), None)
+        if name_col:
+            targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
+            if not targets.empty:
+                price_col = next((c for c in ["现价", "最新价", "价格"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨幅", "涨跌幅"] if c in targets.columns), None)
+                lines = []
+                for _, row in targets.iterrows():
+                    name = row[name_col]
+                    price = row[price_col] if price_col else "暂无"
+                    change = row[change_col] if change_col else "暂无"
+                    lines.append(f"{name}: {price}（{change}%）")
+                return "（QDII亚洲指数）\n" + "\n".join(lines)
+    except Exception as e:
+        print(f"qdii_a_index_jsl 失败: {e}")
+
+    # 方案二：降级到实时接口
     try:
         df = ak.index_global_spot_em()
         print("=== index_global_spot_em 列名 ===")
@@ -223,53 +237,52 @@ def get_asia_pacific_index():
     except Exception as e:
         print(f"index_global_spot_em 失败: {e}")
 
-    # 方案二：降级到QDII亚洲指数
-    try:
-        df = ak.qdii_a_index_jsl()
-        targets = df[df["名称"].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
-        if not targets.empty:
-            return "（QDII亚洲指数）\n" + targets[["名称", "现价", "涨幅"]].to_string(index=False)
-    except Exception as e:
-        print(f"qdii_a_index_jsl 失败: {e}")
-
     return "亚太指数数据暂不可用"
 
 
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500（最近交易日收盘）"""
+    """美股三大指数：道指、纳指、标普500（新浪财经，不受东财风控影响）"""
+    # 方案一：新浪财经美股指数（最稳定）
     try:
-        df = ak.stock_us_spot_em()
-        print("=== stock_us_spot_em 列名 ===")
+        df = ak.index_us_stock_sina()
+        print("=== index_us_stock_sina 列名 ===")
         print(df.columns.tolist())
+        print("=== 前5行 ===")
+        print(df.head().to_string())
 
-        name_col = None
-        for col in ["名称", "name", "Name"]:
-            if col in df.columns:
-                name_col = col
-                break
-
+        name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
         if name_col:
             targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
             if not targets.empty:
-                price_col = next((c for c in ["最新价", "现价", "close"] if c in targets.columns), None)
-                change_col = next((c for c in ["涨跌幅", "涨幅"] if c in targets.columns), None)
+                price_col = next((c for c in ["最新价", "收盘", "close", "price"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
                 lines = []
                 for _, row in targets.iterrows():
                     name = row[name_col]
                     price = row[price_col] if price_col else "暂无"
                     change = row[change_col] if change_col else "暂无"
                     lines.append(f"{name}: {price}（{change}%）")
-                return "（美股实时接口）\n" + "\n".join(lines)
-        return "美股指数数据暂不可用（未匹配到目标）"
+                return "（新浪美股接口）\n" + "\n".join(lines)
+        return "（新浪美股接口）\n" + df.head(5).to_string(index=False)
     except Exception as e:
-        return f"美股指数获取失败: {e}"
+        print(f"index_us_stock_sina 失败: {e}")
+
+    # 方案二：降级到QDII欧美指数
+    try:
+        df = ak.qdii_e_index_jsl()
+        targets = df[df["名称"].str.contains("纳指|标普|道琼斯", na=False)]
+        if not targets.empty:
+            return "（QDII欧美指数）\n" + targets[["名称", "现价", "涨幅"]].to_string(index=False)
+    except Exception as e:
+        print(f"qdii_e_index_jsl 失败: {e}")
+
+    return "美股指数数据暂不可用"
 
 
 # ==========================================
 # 八、机构预期
 # ==========================================
 def get_forecast_data():
-    """盈利预测排名"""
     try:
         df = ak.stock_rank_forecast_cninfo(date=datetime.datetime.now().strftime('%Y%m%d'))
         if df is not None and not df.empty:
@@ -460,7 +473,7 @@ if __name__ == "__main__":
         if not token:
             raise ValueError("未找到 PUSHPLUS_TOKEN")
 
-        topic = os.environ.get("PUSHPLUS_TOPIC")  # 群组编码，可选
+        topic = os.environ.get("PUSHPLUS_TOPIC")
         print("正在推送到微信...")
         send_to_wechat(token, title, content, topic)
         print("执行完毕！")
