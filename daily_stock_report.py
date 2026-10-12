@@ -170,17 +170,38 @@ def get_asia_pacific_index():
 
 
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500"""
+    """美股三大指数：道指、纳指、标普500（前一个交易日收盘数据）"""
     try:
-        df = ak.index_global_spot_em()
-        # 调试：打印前20行，方便确认实际名称
-        print("全球指数列表前20行:")
-        print(df.head(20).to_string())
-
-        targets = df[df["名称"].str.contains("道琼斯|纳斯达克|标普500|标普 500", na=False)]
-        if not targets.empty:
-            return targets[["名称", "最新价", "涨跌幅"]].to_string(index=False)
-        return "美股指数数据暂不可用（未匹配到目标指数）"
+        # 获取全球指数历史数据（东方财富）
+        # 美股指数代码：道琼斯 .DJI、纳斯达克 .IXIC、标普500 .INX
+        us_codes = {
+            ".DJI": "道琼斯",
+            ".IXIC": "纳斯达克",
+            ".INX": "标普500"
+        }
+        
+        result_lines = []
+        today = datetime.datetime.now()
+        
+        for code, name in us_codes.items():
+            try:
+                df = ak.index_global_hist_em(symbol=code)
+                if df is not None and not df.empty:
+                    # 按日期降序排列，取最近的一个交易日
+                    df = df.sort_values("日期", ascending=False)
+                    latest = df.iloc[0]
+                    date_str = str(latest.get("日期", ""))[:10]
+                    close = latest.get("收盘", "暂无")
+                    change = latest.get("涨跌幅", "暂无")
+                    result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}")
+                else:
+                    result_lines.append(f"{name}: 暂无数据")
+            except Exception as e:
+                result_lines.append(f"{name}: 获取失败 - {e}")
+        
+        if result_lines:
+            return "\n".join(result_lines)
+        return "美股指数数据暂不可用"
     except Exception as e:
         return f"美股指数获取失败: {e}"
 
