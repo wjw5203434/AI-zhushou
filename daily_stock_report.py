@@ -170,7 +170,7 @@ def get_market_fund_flow():
 
 
 def get_sector_fund_flow():
-    """行业板块资金流向排名（东方财富免费API直调）"""
+    """行业板块资金流向排名（修正参数版本）"""
     url = "https://push2.eastmoney.com/api/qt/clist/get"
     params = {
         "pn": "1",
@@ -181,7 +181,7 @@ def get_sector_fund_flow():
         "fltt": "2",
         "invt": "2",
         "fid": "f62",
-        "fs": "m:90+t:2",
+        "fs": "m:90+t:3",  # 关键修正：t:2 → t:3
         "fields": "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
     }
     try:
