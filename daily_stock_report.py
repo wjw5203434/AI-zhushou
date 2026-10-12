@@ -92,18 +92,56 @@ def get_market_index():
 # ==========================================
 # 三、资金面数据
 # ==========================================
-def get_northbound_flow():
+def get_market_fund_flow():
+    """大盘资金流向（替代北向资金）"""
     try:
         df = ak.stock_market_fund_flow()
         if df is not None and not df.empty:
             recent = df.tail(3)
-            return "（北向资金已停止披露，以下为大盘主力资金流向）\n" + recent.to_string(index=False)
+            lines = []
+            for _, row in recent.iterrows():
+                date = row.get("日期", "")
+                main_net = row.get("主力净流入-净额", 0)
+                main_pct = row.get("主力净流入-净占比", 0)
+                main_yi = main_net / 100000000 if main_net else 0
+                direction = "流入" if main_yi > 0 else "流出"
+                lines.append(f"{date}：主力净{direction} {abs(main_yi):.0f}亿（{main_pct}%）")
+            return "大盘主力资金流向：\n" + "\n".join(lines)
         return "大盘主力资金数据暂不可用"
     except Exception as e:
         return f"大盘主力资金获取失败: {e}"
 
 
+def get_sector_fund_flow():
+    """行业板块资金流向排名（今日）"""
+    try:
+        df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
+        if df is not None and not df.empty:
+            df_sorted = df.sort_values("主力净流入-净额", ascending=False)
+            top_in = df_sorted.head(5)
+            top_out = df_sorted.tail(5)
+            
+            lines = []
+            lines.append("【资金流入前5板块】")
+            for _, row in top_in.iterrows():
+                name = row.get("名称", "")
+                net = row.get("主力净流入-净额", 0) / 100000000
+                lines.append(f"  {name}：{net:.1f}亿")
+            
+            lines.append("【资金流出前5板块】")
+            for _, row in top_out.iterrows():
+                name = row.get("名称", "")
+                net = row.get("主力净流入-净额", 0) / 100000000
+                lines.append(f"  {name}：{net:.1f}亿")
+            
+            return "\n".join(lines)
+        return "板块资金流向数据暂不可用"
+    except Exception as e:
+        return f"板块资金流向获取失败: {e}"
+
+
 def get_margin_data():
+    """两融余额（上交所）"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         start = (datetime.datetime.now() - datetime.timedelta(days=10)).strftime('%Y%m%d')
@@ -114,6 +152,7 @@ def get_margin_data():
 
 
 def get_lhb_data():
+    """龙虎榜机构净买入"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         df = ak.stock_lhb_detail_em(start_date=today, end_date=today)
@@ -128,6 +167,7 @@ def get_lhb_data():
 # 四、情绪面数据
 # ==========================================
 def get_zt_pool():
+    """涨停池与跌停池统计"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         zt = ak.stock_zt_pool_em(date=today)
@@ -241,7 +281,7 @@ def get_asia_pacific_index():
         for name, code in tickers.items():
             ticker = yf.Ticker(code)
             data = ticker.history(period="2d")
-            if not data.empty:
+            if data is not None and not data.empty:
                 latest = data.iloc[-1]
                 prev = data.iloc[-2] if len(data) >= 2 else latest
                 change = (latest["Close"] - prev["Close"]) / prev["Close"] * 100
@@ -256,66 +296,51 @@ def get_asia_pacific_index():
 
 
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500（多接口尝试）"""
-    result_lines = []
+    """美股三大指数：道指、纳指、标普500（yfinance优先）"""
+    # 方法1：yfinance（最稳定，海外服务器）
+    try:
+        import yfinance as yf
+        tickers = {
+            "道琼斯": "^DJI",
+            "纳斯达克": "^IXIC",
+            "标普500": "^GSPC"
+        }
+        lines = []
+        for name, code in tickers.items():
+            ticker = yf.Ticker(code)
+            data = ticker.history(period="2d")
+            if data is not None and not data.empty:
+                latest = data.iloc[-1]
+                prev = data.iloc[-2] if len(data) >= 2 else latest
+                change = (latest["Close"] - prev["Close"]) / prev["Close"] * 100
+                date_str = str(data.index[-1].date())
+                lines.append(f"{name}（{date_str}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
+        if lines:
+            return "（yfinance）\n" + "\n".join(lines)
+    except Exception as e:
+        print(f"yfinance 失败: {e}")
 
-    # 方法1：东方财富实时
+    # 方法2：东方财富实时
     try:
         df = ak.stock_us_spot_em()
-        print("=== stock_us_spot_em 列名 ===")
-        print(df.columns.tolist())
         name_col = next((c for c in ["名称", "name", "Name"] if c in df.columns), None)
         if name_col:
             targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
             if not targets.empty:
                 price_col = next((c for c in ["最新价", "现价", "close"] if c in targets.columns), None)
                 change_col = next((c for c in ["涨跌幅", "涨幅"] if c in targets.columns), None)
+                lines = []
                 for _, row in targets.iterrows():
                     name = row[name_col]
                     price = row[price_col] if price_col else "暂无"
                     change = row[change_col] if change_col else "暂无"
-                    result_lines.append(f"{name}: {price}（{change}%）")
-                if result_lines:
-                    return "（东财实时）\n" + "\n".join(result_lines)
+                    lines.append(f"{name}: {price}（{change}%）")
+                if lines:
+                    return "（东财实时）\n" + "\n".join(lines)
     except Exception as e:
         print(f"stock_us_spot_em 失败: {e}")
 
-    # 方法2：东方财富全球指数实时
-    try:
-        df = ak.index_global_spot_em()
-        name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
-        if name_col:
-            targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
-            if not targets.empty:
-                price_col = next((c for c in ["最新价", "最新", "close", "价格"] if c in targets.columns), None)
-                change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
-                for _, row in targets.iterrows():
-                    name = row[name_col]
-                    price = row[price_col] if price_col else "暂无"
-                    change = row[change_col] if change_col else "暂无"
-                    result_lines.append(f"{name}: {price}（{change}%）")
-                if result_lines:
-                    return "（东财全球实时）\n" + "\n".join(result_lines)
-    except Exception as e:
-        print(f"index_global_spot_em 失败: {e}")
-
-    # 方法3：东方财富全球历史
-    try:
-        for name in ["道琼斯", "纳斯达克", "标普500"]:
-            df = ak.index_global_hist_em(symbol=name)
-            if df is not None and not df.empty:
-                df = df.sort_values("日期", ascending=False)
-                latest = df.iloc[0]
-                date_str = str(latest.get("日期", ""))[:10]
-                close = latest.get("收盘", "暂无")
-                change = latest.get("涨跌幅", "暂无")
-                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}")
-        if result_lines:
-            return "（东财历史）\n" + "\n".join(result_lines)
-    except Exception as e:
-        print(f"index_global_hist_em 失败: {e}")
-
-    # 方法4：新浪标普500（至少一个）
+    # 方法3：新浪标普500（保底）
     try:
         df = ak.index_us_stock_sina()
         if df is not None and not df.empty:
@@ -329,30 +354,9 @@ def get_us_index():
                 change_str = f"{change:.2f}%"
             else:
                 change_str = "暂无"
-            result_lines.append(f"标普500（{date_str}）: 收盘 {close}，涨跌幅 {change_str}")
-            if result_lines:
-                return "（新浪标普500）\n" + "\n".join(result_lines)
+            return f"（新浪标普500）\n标普500（{date_str}）: 收盘 {close}，涨跌幅 {change_str}"
     except Exception as e:
         print(f"index_us_stock_sina 失败: {e}")
-
-    # 方法5：yfinance
-    try:
-        import yfinance as yf
-        tickers = {"道琼斯": "^DJI", "纳斯达克": "^IXIC", "标普500": "^GSPC"}
-        lines = []
-        for name, code in tickers.items():
-            ticker = yf.Ticker(code)
-            data = ticker.history(period="2d")
-            if not data.empty:
-                latest = data.iloc[-1]
-                prev = data.iloc[-2] if len(data) >= 2 else latest
-                change = (latest["Close"] - prev["Close"]) / prev["Close"] * 100
-                date_str = str(data.index[-1].date())
-                lines.append(f"{name}（{date_str}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
-        if lines:
-            return "（yfinance）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"yfinance 美股失败: {e}")
 
     return "美股指数数据暂不可用"
 
@@ -373,7 +377,7 @@ def get_forecast_data():
 # ==========================================
 # 九、AI 综合分析（含仓位建议 + 走势预测）
 # ==========================================
-def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
+def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin, lhb,
                       zt_stats, macro, commodity, forecast,
                       asia_pacific, us_index, api_key):
     prompt = f"""你是一名专业A股策略分析师。以下是今日多维度市场数据，请整理成一份简洁的早报。
@@ -382,7 +386,8 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 {market_index}
 
 【资金面】
-主力资金流向（替代北向资金）: {northbound}
+大盘资金流向: {market_fund}
+行业板块资金流向: {sector_fund}
 两融余额: {margin}
 龙虎榜: {lhb}
 
@@ -413,7 +418,7 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 <p>内容（不超过3条，每条用<br>分隔）</p>
 
 <h3>二、资金面与情绪面</h3>
-<p>结合主力资金流向、两融、涨跌停数据，判断资金是流入还是流出，市场情绪是贪婪还是恐慌</p>
+<p>结合大盘资金流向、行业板块资金流向、两融、涨跌停数据，判断资金是流入还是流出，市场情绪是贪婪还是恐慌，并指出资金重点流入/流出的板块</p>
 
 <h3>三、科技巨头与产业动态</h3>
 <p>内容</p>
@@ -428,7 +433,7 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 <p>请结合以下三点给出今日大盘走势判断（如：震荡偏强/冲高回落/低开企稳等），并说明关键支撑位和压力位：<br>
 1. 隔夜美股三大指数表现（道指/纳指/标普）<br>
 2. 早盘日经225与韩国KOSPI的开盘方向<br>
-3. 主力资金流向与涨跌停家数反映的A股内部情绪<br>
+3. 大盘资金流向、板块资金流向与涨跌停家数反映的A股内部情绪<br>
 注意：历史上A股与外围存在"非对称联动"——外围大跌时A股跟随概率高，外围大涨时A股未必同步走强。请据此给出审慎判断。如果某项数据缺失，请明确标注"数据缺失"并说明该缺失对判断的影响，不要强行给出结论。</p>
 
 <h3>七、⚠️ 今日风险提示</h3>
@@ -508,8 +513,11 @@ if __name__ == "__main__":
         print("正在获取大盘指数...")
         market_index = get_market_index()
 
-        print("正在获取主力资金流向...")
-        northbound = safe_fetch("主力资金流向", get_northbound_flow)
+        print("正在获取大盘资金流向...")
+        market_fund = safe_fetch("大盘资金流向", get_market_fund_flow)
+
+        print("正在获取行业板块资金流向...")
+        sector_fund = safe_fetch("行业板块资金流向", get_sector_fund_flow)
 
         print("正在获取两融数据...")
         margin = safe_fetch("两融数据", get_margin_data)
@@ -539,8 +547,8 @@ if __name__ == "__main__":
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             raise ValueError("未找到 DEEPSEEK_API_KEY")
-        summary = summarize_with_ai(news_list, market_index, northbound, margin,
-                                    lhb, zt_stats, macro, commodity, forecast,
+        summary = summarize_with_ai(news_list, market_index, market_fund, sector_fund,
+                                    margin, lhb, zt_stats, macro, commodity, forecast,
                                     asia_pacific, us_index, api_key)
 
         print("正在生成报告...")
