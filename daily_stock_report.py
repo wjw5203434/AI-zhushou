@@ -119,19 +119,19 @@ def get_macro_data():
     result = []
     try:
         pmi = ak.macro_china_pmi()
-        result.append(f"PMI最新: {pmi.iloc[-1].to_dict() if len(pmi) > 0 else '暂无'}")
+        result.append(f"PMI最新: {pmi.iloc[0].to_dict() if len(pmi) > 0 else '暂无'}")
     except:
         result.append("PMI获取失败")
 
     try:
         cpi = ak.macro_china_cpi()
-        result.append(f"CPI最新: {cpi.iloc[-1].to_dict() if len(cpi) > 0 else '暂无'}")
+        result.append(f"CPI最新: {cpi.iloc[0].to_dict() if len(cpi) > 0 else '暂无'}")
     except:
         result.append("CPI获取失败")
 
     try:
         m2 = ak.macro_china_money_supply()
-        result.append(f"M2最新: {m2.iloc[-1].to_dict() if len(m2) > 0 else '暂无'}")
+        result.append(f"M2最新: {m2.iloc[0].to_dict() if len(m2) > 0 else '暂无'}")
     except:
         result.append("M2获取失败")
 
