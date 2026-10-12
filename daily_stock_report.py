@@ -95,14 +95,15 @@ def get_market_index():
 # 三、资金面数据
 # ==========================================
 def get_northbound_flow():
-    """北向资金净流入"""
+    """北向资金已停止披露，改用大盘主力资金流向替代"""
     try:
-        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北向资金")
-        recent = df.tail(3)
-        return recent.to_string(index=False)
+        df = ak.stock_market_fund_flow()
+        if df is not None and not df.empty:
+            recent = df.tail(3)
+            return "（北向资金已停止披露，以下为大盘主力资金流向）\n" + recent.to_string(index=False)
+        return "大盘主力资金数据暂不可用"
     except Exception as e:
-        return f"北向资金获取失败: {e}"
-
+        return f"大盘主力资金获取失败: {e}"
 
 def get_margin_data():
     """两融余额（上交所）"""
@@ -199,43 +200,14 @@ def get_commodity_data():
 # 七、亚太与美股指数
 # ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI"""
+    """日经225、韩国KOSPI（优先实时，降级历史）"""
+    # 方案一：实时行情接口（能拿到当日盘中数据）
     try:
         df = ak.index_global_spot_em()
-        print("=== 全球指数列名 ===")
+        print("=== index_global_spot_em 列名 ===")
         print(df.columns.tolist())
-        print("=== 前20行 ===")
-        print(df.head(20).to_string())
 
-        # 尝试多种可能的名称列
-        name_col = None
-        for col in ["名称", "指数名称", "name", "Name"]:
-            if col in df.columns:
-                name_col = col
-                break
-
-        if name_col is None:
-            return "接口返回中未找到名称列，请查看日志确认字段"
-
-        targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
-        if not targets.empty:
-            show_cols = [c for c in [name_col, "最新价", "涨跌幅", "最新", "涨幅"] if c in targets.columns]
-            return targets[show_cols].head(5).to_string(index=False)
-        return "亚太指数数据暂不可用（未匹配到目标）"
-    except Exception as e:
-        return f"亚太指数获取失败: {e}"
-
-def get_us_index():
-    """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
-    # 方案一：新浪财经美股指数（结构最稳定）
-    try:
-        df = ak.index_us_stock_sina()
-        print("=== index_us_stock_sina 列名 ===")
-        print(df.columns.tolist())
-        print("=== 前5行 ===")
-        print(df.head().to_string())
-
-        # 尝试多种可能的名称列
+        # 灵活匹配名称列
         name_col = None
         for col in ["名称", "指数名称", "name", "Name"]:
             if col in df.columns:
@@ -243,38 +215,69 @@ def get_us_index():
                 break
 
         if name_col:
-            targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
+            targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
             if not targets.empty:
-                return "（新浪美股接口）\n" + targets.to_string(index=False)
+                # 灵活匹配价格和涨跌幅列
+                price_col = next((c for c in ["最新价", "最新", "close", "价格"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
 
-        return "（新浪美股接口）\n" + df.head(5).to_string(index=False)
+                lines = []
+                for _, row in targets.iterrows():
+                    name = row[name_col]
+                    price = row[price_col] if price_col else "暂无"
+                    change = row[change_col] if change_col else "暂无"
+                    lines.append(f"{name}: {price}（{change}%）")
+                return "（实时接口）\n" + "\n".join(lines)
     except Exception as e:
-        print(f"index_us_stock_sina 失败: {e}")
+        print(f"index_global_spot_em 失败: {e}")
 
-    # 方案二：东方财富全球指数历史（备选）
-    try:
-        us_names = ["道琼斯", "纳斯达克", "标普500"]
-        lines = []
-        for name in us_names:
-            try:
-                df = ak.index_global_hist_em(symbol=name)
-                if df is not None and not df.empty:
-                    df = df.sort_values("日期", ascending=False)
-                    latest = df.iloc[0]
-                    date_str = str(latest.get("日期", ""))[:10]
-                    close = latest.get("收盘", "暂无")
-                    change = latest.get("涨跌幅", "暂无")
-                    lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}")
-                else:
-                    lines.append(f"{name}: 暂无数据")
-            except Exception as e:
-                lines.append(f"{name}: 获取失败 - {e}")
-        if lines:
-            return "（东财接口）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"index_global_hist_em 失败: {e}")
+    # 方案二：降级到历史接口（前一日收盘）
+    apac_indices = {
+        "日经225": ".N225",
+        "韩国KOSPI": ".KS11"
+    }
+    result_lines = []
+    for name, symbol in apac_indices.items():
+        try:
+            df = ak.index_global_hist_sina(symbol=symbol)
+            if df is not None and not df.empty:
+                df = df.sort_values("date", ascending=False)
+                latest = df.iloc[0]
+                date_str = str(latest.get("date", ""))[:10]
+                close = latest.get("close", "暂无")
+                change = latest.get("change_pct", "暂无")
+                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}%")
+        except Exception as e:
+            result_lines.append(f"{name}: 获取失败 - {e}")
 
-    return "美股指数数据暂不可用"
+    if result_lines:
+        return "（历史接口，前一日收盘）\n" + "\n".join(result_lines)
+    return "亚太指数数据暂不可用"
+
+def get_us_index():
+    """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
+    us_indices = {
+        "道琼斯": ".DJI",
+        "纳斯达克": ".IXIC",
+        "标普500": ".INX"
+    }
+    result_lines = []
+    for name, symbol in us_indices.items():
+        try:
+            df = ak.index_global_hist_sina(symbol=symbol)
+            if df is not None and not df.empty:
+                df = df.sort_values("date", ascending=False)
+                latest = df.iloc[0]
+                date_str = str(latest.get("date", ""))[:10]
+                close = latest.get("close", "暂无")
+                change = latest.get("change_pct", "暂无")
+                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}%")
+            else:
+                result_lines.append(f"{name}: 暂无数据")
+        except Exception as e:
+            result_lines.append(f"{name}: 获取失败 - {e}")
+
+    return "\n".join(result_lines) if result_lines else "美股指数数据暂不可用"
 
 
 # ==========================================
