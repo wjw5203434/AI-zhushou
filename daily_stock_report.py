@@ -39,15 +39,56 @@ def get_finance_news():
 
 
 # ==========================================
-# 二、大盘指数数据
+# 二、大盘指数数据（含成交量绝对变化）
 # ==========================================
 def get_market_index():
-    try:
-        df = ak.stock_zh_index_spot_sina()
-        df = df[df["名称"].isin(["上证指数", "深证成指", "创业板指"])]
-        return df.to_string(index=False)
-    except Exception as e:
-        return f"大盘指数获取失败: {e}"
+    """获取三大指数最新收盘数据，并显示较前日放量/缩量多少亿"""
+    indices = {
+        "000001": "上证指数",
+        "399001": "深证成指",
+        "399006": "创业板指"
+    }
+    result_lines = []
+    today = datetime.datetime.now()
+    start_date = (today - datetime.timedelta(days=15)).strftime('%Y%m%d')
+    end_date = today.strftime('%Y%m%d')
+
+    for code, name in indices.items():
+        try:
+            df = ak.index_zh_a_hist(symbol=code, period="daily",
+                                    start_date=start_date, end_date=end_date)
+            if df is not None and len(df) >= 2:
+                last = df.iloc[-1]
+                prev = df.iloc[-2]
+
+                date_str = str(last.get("日期", ""))[:10]
+                close = last.get("收盘", "暂无")
+                change = last.get("涨跌幅", "暂无")
+                amount = last.get("成交额", 0)
+                prev_amount = prev.get("成交额", 0)
+
+                # 成交额单位：元 → 亿元
+                amount_yi = amount / 100000000 if amount else 0
+                prev_amount_yi = prev_amount / 100000000 if prev_amount else 0
+
+                diff = amount_yi - prev_amount_yi
+                if diff > 0:
+                    volume_status = f"较前日放量 {diff:.0f}亿"
+                elif diff < 0:
+                    volume_status = f"较前日缩量 {abs(diff):.0f}亿"
+                else:
+                    volume_status = "较前日持平"
+
+                result_lines.append(
+                    f"{name}（{date_str}）：收盘 {close}（{change}%），"
+                    f"成交额 {amount_yi:.0f}亿，{volume_status}"
+                )
+            else:
+                result_lines.append(f"{name}：历史数据不足")
+        except Exception as e:
+            result_lines.append(f"{name}：获取失败 - {e}")
+
+    return "\n".join(result_lines) if result_lines else "大盘指数获取失败"
 
 
 # ==========================================
@@ -112,10 +153,10 @@ def get_zt_pool():
 
 
 # ==========================================
-# 五、宏观数据
+# 五、宏观数据（修正为 iloc[0] 获取最新）
 # ==========================================
 def get_macro_data():
-    """PMI / CPI / M2"""
+    """PMI / CPI / M2（取最新数据）"""
     result = []
     try:
         pmi = ak.macro_china_pmi()
@@ -158,7 +199,7 @@ def get_commodity_data():
 # 七、亚太与美股指数
 # ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI"""
+    """日经225、韩国KOSPI（实时或最近收盘）"""
     try:
         df = ak.index_global_spot_em()
         targets = df[df["名称"].str.contains("日经|韩国", na=False)]
@@ -170,24 +211,18 @@ def get_asia_pacific_index():
 
 
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500（前一个交易日收盘数据）"""
+    """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
     try:
-        # 获取全球指数历史数据（东方财富）
-        # 美股指数代码：道琼斯 .DJI、纳斯达克 .IXIC、标普500 .INX
         us_codes = {
             ".DJI": "道琼斯",
             ".IXIC": "纳斯达克",
             ".INX": "标普500"
         }
-        
         result_lines = []
-        today = datetime.datetime.now()
-        
         for code, name in us_codes.items():
             try:
                 df = ak.index_global_hist_em(symbol=code)
                 if df is not None and not df.empty:
-                    # 按日期降序排列，取最近的一个交易日
                     df = df.sort_values("日期", ascending=False)
                     latest = df.iloc[0]
                     date_str = str(latest.get("日期", ""))[:10]
@@ -198,7 +233,7 @@ def get_us_index():
                     result_lines.append(f"{name}: 暂无数据")
             except Exception as e:
                 result_lines.append(f"{name}: 获取失败 - {e}")
-        
+
         if result_lines:
             return "\n".join(result_lines)
         return "美股指数数据暂不可用"
