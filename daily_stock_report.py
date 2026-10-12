@@ -155,7 +155,34 @@ def get_commodity_data():
 
 
 # ==========================================
-# 七、机构预期
+# 七、亚太与美股指数
+# ==========================================
+def get_asia_pacific_index():
+    """日经225、韩国KOSPI"""
+    try:
+        df = ak.index_global_spot_em()
+        targets = df[df["名称"].str.contains("日经|韩国", na=False)]
+        if not targets.empty:
+            return targets[["名称", "最新价", "涨跌幅"]].to_string(index=False)
+        return "亚太指数数据暂不可用"
+    except Exception as e:
+        return f"亚太指数获取失败: {e}"
+
+
+def get_us_index():
+    """美股三大指数：道指、纳指、标普500"""
+    try:
+        df = ak.index_us_stock_sina()
+        targets = df[df["名称"].str.contains("道琼斯|纳斯达克|标普", na=False)]
+        if not targets.empty:
+            return targets[["名称", "最新价", "涨跌幅"]].to_string(index=False)
+        return "美股指数数据暂不可用"
+    except Exception as e:
+        return f"美股指数获取失败: {e}"
+
+
+# ==========================================
+# 八、机构预期
 # ==========================================
 def get_forecast_data():
     """盈利预测排名"""
@@ -169,10 +196,11 @@ def get_forecast_data():
 
 
 # ==========================================
-# 八、AI 综合分析（含仓位建议 + 走势预测）
+# 九、AI 综合分析（含仓位建议 + 走势预测）
 # ==========================================
 def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
-                      zt_stats, macro, commodity, forecast, api_key):
+                      zt_stats, macro, commodity, forecast,
+                      asia_pacific, us_index, api_key):
     prompt = f"""你是一名专业A股策略分析师。以下是今日多维度市场数据，请整理成一份简洁的早报。
 
 【大盘指数】
@@ -191,6 +219,12 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 
 【大宗商品】
 {commodity}
+
+【亚太股市（日经/韩国）】
+{asia_pacific}
+
+【美股隔夜表现】
+{us_index}
 
 【机构预期】
 {forecast}
@@ -216,7 +250,11 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 <p>根据当前市场环境，给出建议仓位区间（如：30%-50%），并说明理由。格式：<strong>建议仓位：XX%-XX%</strong><br>理由：...</p>
 
 <h3>六、📈 今日走势预测</h3>
-<p>基于隔夜外盘、资金面、情绪面，给出今日大盘走势的判断（如：震荡偏强/冲高回落/低开企稳等），并说明关键支撑位和压力位</p>
+<p>请结合以下三点给出今日大盘走势判断（如：震荡偏强/冲高回落/低开企稳等），并说明关键支撑位和压力位：<br>
+1. 隔夜美股三大指数表现（道指/纳指/标普）<br>
+2. 早盘日经225与韩国KOSPI的开盘方向<br>
+3. 北向资金与涨跌停家数反映的A股内部情绪<br>
+注意：历史上A股与外围存在“非对称联动”——外围大跌时A股跟随概率高，外围大涨时A股未必同步走强。请据此给出审慎判断。</p>
 
 <h3>七、⚠️ 今日风险提示</h3>
 <p>内容</p>
@@ -245,7 +283,7 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 
 
 # ==========================================
-# 九、HTML 报告模板
+# 十、HTML 报告模板
 # ==========================================
 def build_html_report(content):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
@@ -266,9 +304,9 @@ def build_html_report(content):
 
 
 # ==========================================
-# 十、推送
+# 十一、推送（支持群组）
 # ==========================================
-def send_to_wechat(token, title, content):
+def send_to_wechat(token, title, content, topic=None):
     url = "http://www.pushplus.plus/send"
     data = {
         "token": token,
@@ -276,6 +314,8 @@ def send_to_wechat(token, title, content):
         "content": content,
         "template": "html"
     }
+    if topic:
+        data["topic"] = topic
     response = requests.post(url, json=data)
     print("推送结果:", response.text)
 
@@ -311,6 +351,12 @@ if __name__ == "__main__":
         print("正在获取大宗商品...")
         commodity = safe_fetch("大宗商品", get_commodity_data)
 
+        print("正在获取亚太指数...")
+        asia_pacific = safe_fetch("亚太指数", get_asia_pacific_index)
+
+        print("正在获取美股指数...")
+        us_index = safe_fetch("美股指数", get_us_index)
+
         print("正在获取机构预期...")
         forecast = safe_fetch("机构预期", get_forecast_data)
 
@@ -319,7 +365,8 @@ if __name__ == "__main__":
         if not api_key:
             raise ValueError("未找到 DEEPSEEK_API_KEY")
         summary = summarize_with_ai(news_list, market_index, northbound, margin,
-                                    lhb, zt_stats, macro, commodity, forecast, api_key)
+                                    lhb, zt_stats, macro, commodity, forecast,
+                                    asia_pacific, us_index, api_key)
 
         print("正在生成报告...")
         title = "今日财经内参"
@@ -329,8 +376,9 @@ if __name__ == "__main__":
         if not token:
             raise ValueError("未找到 PUSHPLUS_TOKEN")
 
+        topic = os.environ.get("PUSHPLUS_TOPIC")  # 群组编码，可选
         print("正在推送到微信...")
-        send_to_wechat(token, title, content)
+        send_to_wechat(token, title, content, topic)
         print("执行完毕！")
 
     except Exception as e:
