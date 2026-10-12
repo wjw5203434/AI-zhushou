@@ -105,6 +105,7 @@ def get_northbound_flow():
     except Exception as e:
         return f"大盘主力资金获取失败: {e}"
 
+
 def get_margin_data():
     """两融余额（上交所）"""
     try:
@@ -141,7 +142,6 @@ def get_zt_pool():
         dt = ak.stock_zt_pool_dtgc_em(date=today)
         dt_count = len(dt) if dt is not None and not dt.empty else 0
 
-        # 连板统计
         if zt is not None and not zt.empty and "连板数" in zt.columns:
             lianban = zt[zt["连板数"] >= 2]
             lianban_count = len(lianban)
@@ -154,7 +154,7 @@ def get_zt_pool():
 
 
 # ==========================================
-# 五、宏观数据（修正为 iloc[0] 获取最新）
+# 五、宏观数据（取最新）
 # ==========================================
 def get_macro_data():
     """PMI / CPI / M2（取最新数据）"""
@@ -197,30 +197,22 @@ def get_commodity_data():
 
 
 # ==========================================
-# 七、亚太与美股指数
+# 七、亚太与美股指数（关键修复）
 # ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI（优先实时，降级历史）"""
-    # 方案一：实时行情接口（能拿到当日盘中数据）
+    """日经225、韩国KOSPI（优先实时，降级QDII）"""
+    # 方案一：实时行情接口
     try:
         df = ak.index_global_spot_em()
         print("=== index_global_spot_em 列名 ===")
         print(df.columns.tolist())
 
-        # 灵活匹配名称列
-        name_col = None
-        for col in ["名称", "指数名称", "name", "Name"]:
-            if col in df.columns:
-                name_col = col
-                break
-
+        name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
         if name_col:
             targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
             if not targets.empty:
-                # 灵活匹配价格和涨跌幅列
                 price_col = next((c for c in ["最新价", "最新", "close", "价格"] if c in targets.columns), None)
                 change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
-
                 lines = []
                 for _, row in targets.iterrows():
                     name = row[name_col]
@@ -231,53 +223,46 @@ def get_asia_pacific_index():
     except Exception as e:
         print(f"index_global_spot_em 失败: {e}")
 
-    # 方案二：降级到历史接口（前一日收盘）
-    apac_indices = {
-        "日经225": ".N225",
-        "韩国KOSPI": ".KS11"
-    }
-    result_lines = []
-    for name, symbol in apac_indices.items():
-        try:
-            df = ak.index_global_hist_sina(symbol=symbol)
-            if df is not None and not df.empty:
-                df = df.sort_values("date", ascending=False)
-                latest = df.iloc[0]
-                date_str = str(latest.get("date", ""))[:10]
-                close = latest.get("close", "暂无")
-                change = latest.get("change_pct", "暂无")
-                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}%")
-        except Exception as e:
-            result_lines.append(f"{name}: 获取失败 - {e}")
+    # 方案二：降级到QDII亚洲指数
+    try:
+        df = ak.qdii_a_index_jsl()
+        targets = df[df["名称"].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
+        if not targets.empty:
+            return "（QDII亚洲指数）\n" + targets[["名称", "现价", "涨幅"]].to_string(index=False)
+    except Exception as e:
+        print(f"qdii_a_index_jsl 失败: {e}")
 
-    if result_lines:
-        return "（历史接口，前一日收盘）\n" + "\n".join(result_lines)
     return "亚太指数数据暂不可用"
 
-def get_us_index():
-    """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
-    us_indices = {
-        "道琼斯": ".DJI",
-        "纳斯达克": ".IXIC",
-        "标普500": ".INX"
-    }
-    result_lines = []
-    for name, symbol in us_indices.items():
-        try:
-            df = ak.index_global_hist_sina(symbol=symbol)
-            if df is not None and not df.empty:
-                df = df.sort_values("date", ascending=False)
-                latest = df.iloc[0]
-                date_str = str(latest.get("date", ""))[:10]
-                close = latest.get("close", "暂无")
-                change = latest.get("change_pct", "暂无")
-                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}%")
-            else:
-                result_lines.append(f"{name}: 暂无数据")
-        except Exception as e:
-            result_lines.append(f"{name}: 获取失败 - {e}")
 
-    return "\n".join(result_lines) if result_lines else "美股指数数据暂不可用"
+def get_us_index():
+    """美股三大指数：道指、纳指、标普500（最近交易日收盘）"""
+    try:
+        df = ak.stock_us_spot_em()
+        print("=== stock_us_spot_em 列名 ===")
+        print(df.columns.tolist())
+
+        name_col = None
+        for col in ["名称", "name", "Name"]:
+            if col in df.columns:
+                name_col = col
+                break
+
+        if name_col:
+            targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
+            if not targets.empty:
+                price_col = next((c for c in ["最新价", "现价", "close"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨跌幅", "涨幅"] if c in targets.columns), None)
+                lines = []
+                for _, row in targets.iterrows():
+                    name = row[name_col]
+                    price = row[price_col] if price_col else "暂无"
+                    change = row[change_col] if change_col else "暂无"
+                    lines.append(f"{name}: {price}（{change}%）")
+                return "（美股实时接口）\n" + "\n".join(lines)
+        return "美股指数数据暂不可用（未匹配到目标）"
+    except Exception as e:
+        return f"美股指数获取失败: {e}"
 
 
 # ==========================================
@@ -306,7 +291,7 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 {market_index}
 
 【资金面】
-北向资金: {northbound}
+主力资金流向（替代北向资金）: {northbound}
 两融余额: {margin}
 龙虎榜: {lhb}
 
@@ -337,7 +322,7 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 <p>内容（不超过3条，每条用<br>分隔）</p>
 
 <h3>二、资金面与情绪面</h3>
-<p>结合北向资金、两融、涨跌停数据，判断资金是流入还是流出，市场情绪是贪婪还是恐慌</p>
+<p>结合主力资金流向、两融、涨跌停数据，判断资金是流入还是流出，市场情绪是贪婪还是恐慌</p>
 
 <h3>三、科技巨头与产业动态</h3>
 <p>内容</p>
@@ -352,8 +337,8 @@ def summarize_with_ai(news_list, market_index, northbound, margin, lhb,
 <p>请结合以下三点给出今日大盘走势判断（如：震荡偏强/冲高回落/低开企稳等），并说明关键支撑位和压力位：<br>
 1. 隔夜美股三大指数表现（道指/纳指/标普）<br>
 2. 早盘日经225与韩国KOSPI的开盘方向<br>
-3. 北向资金与涨跌停家数反映的A股内部情绪<br>
-注意：历史上A股与外围存在“非对称联动”——外围大跌时A股跟随概率高，外围大涨时A股未必同步走强。请据此给出审慎判断。</p>
+3. 主力资金流向与涨跌停家数反映的A股内部情绪<br>
+注意：历史上A股与外围存在"非对称联动"——外围大跌时A股跟随概率高，外围大涨时A股未必同步走强。请据此给出审慎判断。如果某项数据缺失，请明确标注"数据缺失"并说明该缺失对判断的影响，不要强行给出结论。</p>
 
 <h3>七、⚠️ 今日风险提示</h3>
 <p>内容</p>
@@ -432,8 +417,8 @@ if __name__ == "__main__":
         print("正在获取大盘指数...")
         market_index = get_market_index()
 
-        print("正在获取北向资金...")
-        northbound = safe_fetch("北向资金", get_northbound_flow)
+        print("正在获取主力资金流向...")
+        northbound = safe_fetch("主力资金流向", get_northbound_flow)
 
         print("正在获取两融数据...")
         margin = safe_fetch("两融数据", get_margin_data)
