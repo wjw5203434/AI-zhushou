@@ -189,38 +189,15 @@ def get_commodity_data():
 
 
 # ==========================================
-# 七、亚太与美股指数（关键修复）
+# 七、亚太与美股指数（多接口降级）
 # ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI（优先QDII亚洲指数，降级实时接口）"""
-    # 方案一：QDII亚洲指数（集思录，不受东财风控影响）
-    try:
-        df = ak.qdii_a_index_jsl()
-        print("=== qdii_a_index_jsl 列名 ===")
-        print(df.columns.tolist())
-
-        name_col = next((c for c in ["名称", "相关标的", "指数名称"] if c in df.columns), None)
-        if name_col:
-            targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
-            if not targets.empty:
-                price_col = next((c for c in ["现价", "最新价", "价格"] if c in targets.columns), None)
-                change_col = next((c for c in ["涨幅", "涨跌幅"] if c in targets.columns), None)
-                lines = []
-                for _, row in targets.iterrows():
-                    name = row[name_col]
-                    price = row[price_col] if price_col else "暂无"
-                    change = row[change_col] if change_col else "暂无"
-                    lines.append(f"{name}: {price}（{change}%）")
-                return "（QDII亚洲指数）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"qdii_a_index_jsl 失败: {e}")
-
-    # 方案二：降级到实时接口
+    """日经225、韩国KOSPI（多接口尝试）"""
+    # 方法1：东方财富全球实时
     try:
         df = ak.index_global_spot_em()
         print("=== index_global_spot_em 列名 ===")
         print(df.columns.tolist())
-
         name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
         if name_col:
             targets = df[df[name_col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
@@ -233,48 +210,149 @@ def get_asia_pacific_index():
                     price = row[price_col] if price_col else "暂无"
                     change = row[change_col] if change_col else "暂无"
                     lines.append(f"{name}: {price}（{change}%）")
-                return "（实时接口）\n" + "\n".join(lines)
+                return "（东财实时）\n" + "\n".join(lines)
     except Exception as e:
         print(f"index_global_spot_em 失败: {e}")
+
+    # 方法2：集思录 QDII 亚洲
+    try:
+        df = ak.qdii_a_index_jsl()
+        print("=== qdii_a_index_jsl 列名 ===")
+        print(df.columns.tolist())
+        for col in ["相关标的", "名称"]:
+            if col in df.columns:
+                targets = df[df[col].str.contains("日经|韩国|KOSPI|Nikkei", na=False)]
+                if not targets.empty:
+                    lines = []
+                    for _, row in targets.iterrows():
+                        name = row.get("名称", "未知")
+                        price = row.get("现价", "暂无")
+                        change = row.get("涨幅", "暂无")
+                        lines.append(f"{name}: {price}（{change}）")
+                    return "（集思录QDII）\n" + "\n".join(lines)
+    except Exception as e:
+        print(f"qdii_a_index_jsl 失败: {e}")
+
+    # 方法3：yfinance
+    try:
+        import yfinance as yf
+        tickers = {"日经225": "^N225", "韩国KOSPI": "^KS11"}
+        lines = []
+        for name, code in tickers.items():
+            ticker = yf.Ticker(code)
+            data = ticker.history(period="2d")
+            if not data.empty:
+                latest = data.iloc[-1]
+                prev = data.iloc[-2] if len(data) >= 2 else latest
+                change = (latest["Close"] - prev["Close"]) / prev["Close"] * 100
+                date_str = str(data.index[-1].date())
+                lines.append(f"{name}（{date_str}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
+        if lines:
+            return "（yfinance）\n" + "\n".join(lines)
+    except Exception as e:
+        print(f"yfinance 亚太失败: {e}")
 
     return "亚太指数数据暂不可用"
 
 
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500（新浪财经，不受东财风控影响）"""
-    # 方案一：新浪财经美股指数（最稳定）
-    try:
-        df = ak.index_us_stock_sina()
-        print("=== index_us_stock_sina 列名 ===")
-        print(df.columns.tolist())
-        print("=== 前5行 ===")
-        print(df.head().to_string())
+    """美股三大指数：道指、纳指、标普500（多接口尝试）"""
+    result_lines = []
 
-        name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
+    # 方法1：东方财富实时
+    try:
+        df = ak.stock_us_spot_em()
+        print("=== stock_us_spot_em 列名 ===")
+        print(df.columns.tolist())
+        name_col = next((c for c in ["名称", "name", "Name"] if c in df.columns), None)
         if name_col:
             targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
             if not targets.empty:
-                price_col = next((c for c in ["最新价", "收盘", "close", "price"] if c in targets.columns), None)
-                change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
-                lines = []
+                price_col = next((c for c in ["最新价", "现价", "close"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨跌幅", "涨幅"] if c in targets.columns), None)
                 for _, row in targets.iterrows():
                     name = row[name_col]
                     price = row[price_col] if price_col else "暂无"
                     change = row[change_col] if change_col else "暂无"
-                    lines.append(f"{name}: {price}（{change}%）")
-                return "（新浪美股接口）\n" + "\n".join(lines)
-        return "（新浪美股接口）\n" + df.head(5).to_string(index=False)
+                    result_lines.append(f"{name}: {price}（{change}%）")
+                if result_lines:
+                    return "（东财实时）\n" + "\n".join(result_lines)
+    except Exception as e:
+        print(f"stock_us_spot_em 失败: {e}")
+
+    # 方法2：东方财富全球指数实时
+    try:
+        df = ak.index_global_spot_em()
+        name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
+        if name_col:
+            targets = df[df[name_col].str.contains("道琼斯|纳斯达克|标普", na=False)]
+            if not targets.empty:
+                price_col = next((c for c in ["最新价", "最新", "close", "价格"] if c in targets.columns), None)
+                change_col = next((c for c in ["涨跌幅", "涨幅", "change_pct"] if c in targets.columns), None)
+                for _, row in targets.iterrows():
+                    name = row[name_col]
+                    price = row[price_col] if price_col else "暂无"
+                    change = row[change_col] if change_col else "暂无"
+                    result_lines.append(f"{name}: {price}（{change}%）")
+                if result_lines:
+                    return "（东财全球实时）\n" + "\n".join(result_lines)
+    except Exception as e:
+        print(f"index_global_spot_em 失败: {e}")
+
+    # 方法3：东方财富全球历史
+    try:
+        for name in ["道琼斯", "纳斯达克", "标普500"]:
+            df = ak.index_global_hist_em(symbol=name)
+            if df is not None and not df.empty:
+                df = df.sort_values("日期", ascending=False)
+                latest = df.iloc[0]
+                date_str = str(latest.get("日期", ""))[:10]
+                close = latest.get("收盘", "暂无")
+                change = latest.get("涨跌幅", "暂无")
+                result_lines.append(f"{name}（{date_str}）: 收盘 {close}，涨跌幅 {change}")
+        if result_lines:
+            return "（东财历史）\n" + "\n".join(result_lines)
+    except Exception as e:
+        print(f"index_global_hist_em 失败: {e}")
+
+    # 方法4：新浪标普500（至少一个）
+    try:
+        df = ak.index_us_stock_sina()
+        if df is not None and not df.empty:
+            df = df.sort_values("date", ascending=False)
+            latest = df.iloc[0]
+            date_str = str(latest.get("date", ""))[:10]
+            close = latest.get("close", "暂无")
+            if len(df) >= 2:
+                prev_close = df.iloc[1].get("close", close)
+                change = (close - prev_close) / prev_close * 100 if prev_close else 0
+                change_str = f"{change:.2f}%"
+            else:
+                change_str = "暂无"
+            result_lines.append(f"标普500（{date_str}）: 收盘 {close}，涨跌幅 {change_str}")
+            if result_lines:
+                return "（新浪标普500）\n" + "\n".join(result_lines)
     except Exception as e:
         print(f"index_us_stock_sina 失败: {e}")
 
-    # 方案二：降级到QDII欧美指数
+    # 方法5：yfinance
     try:
-        df = ak.qdii_e_index_jsl()
-        targets = df[df["名称"].str.contains("纳指|标普|道琼斯", na=False)]
-        if not targets.empty:
-            return "（QDII欧美指数）\n" + targets[["名称", "现价", "涨幅"]].to_string(index=False)
+        import yfinance as yf
+        tickers = {"道琼斯": "^DJI", "纳斯达克": "^IXIC", "标普500": "^GSPC"}
+        lines = []
+        for name, code in tickers.items():
+            ticker = yf.Ticker(code)
+            data = ticker.history(period="2d")
+            if not data.empty:
+                latest = data.iloc[-1]
+                prev = data.iloc[-2] if len(data) >= 2 else latest
+                change = (latest["Close"] - prev["Close"]) / prev["Close"] * 100
+                date_str = str(data.index[-1].date())
+                lines.append(f"{name}（{date_str}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
+        if lines:
+            return "（yfinance）\n" + "\n".join(lines)
     except Exception as e:
-        print(f"qdii_e_index_jsl 失败: {e}")
+        print(f"yfinance 美股失败: {e}")
 
     return "美股指数数据暂不可用"
 
