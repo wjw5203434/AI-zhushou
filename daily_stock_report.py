@@ -172,11 +172,15 @@ def get_asia_pacific_index():
 def get_us_index():
     """美股三大指数：道指、纳指、标普500"""
     try:
-        df = ak.index_us_stock_sina()
-        targets = df[df["名称"].str.contains("道琼斯|纳斯达克|标普", na=False)]
+        df = ak.index_global_spot_em()
+        # 调试：打印前20行，方便确认实际名称
+        print("全球指数列表前20行:")
+        print(df.head(20).to_string())
+
+        targets = df[df["名称"].str.contains("道琼斯|纳斯达克|标普500|标普 500", na=False)]
         if not targets.empty:
             return targets[["名称", "最新价", "涨跌幅"]].to_string(index=False)
-        return "美股指数数据暂不可用"
+        return "美股指数数据暂不可用（未匹配到目标指数）"
     except Exception as e:
         return f"美股指数获取失败: {e}"
 
