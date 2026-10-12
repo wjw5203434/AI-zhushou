@@ -212,6 +212,7 @@ def get_asia_pacific_index():
 
 def get_us_index():
     """美股三大指数：道指、纳指、标普500（前一交易日收盘数据）"""
+    print("可用的全球指数名称:", ak.index_global_name_table()["名称"].tolist())
     us_indices = {
         "道琼斯": "道琼斯",
         "纳斯达克": "纳斯达克",
