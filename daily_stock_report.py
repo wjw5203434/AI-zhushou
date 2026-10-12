@@ -7,32 +7,42 @@ import requests
 # 第一步：获取行情数据
 # ==========================================
 def get_finance_news():
-    """获取宏观政策与科技巨头相关新闻"""
     news_list = []
-    
+    keywords = ["美联储", "加息", "英伟达", "美光", "半导体", "AI", "算力", "政策", "国务院", "央行", "降准", "降息"]
+
     try:
-        # 1. 百度经济新闻（宏观政策方向）
-        print("正在获取百度经济新闻...")
-        df_econ = ak.news_economic_baidu()
-        for _, row in df_econ.head(8).iterrows():
-            news_list.append(f"【宏观】{row.get('标题', '')} — {row.get('摘要', '')[:80]}")
+        df = ak.stock_info_global_cls()
+        for _, row in df.head(30).iterrows():
+            title = str(row.get("标题", ""))
+            content = str(row.get("内容", ""))[:100]
+            if any(k in title or k in content for k in keywords):
+                news_list.append(f"{title} — {content}")
     except Exception as e:
-        print(f"百度经济新闻获取失败: {e}")
-    
-    try:
-        # 2. 央视新闻（国内政策方向）
-        print("正在获取央视新闻...")
-        df_cctv = ak.news_cctv()
-        for _, row in df_cctv.head(5).iterrows():
-            news_list.append(f"【政策】{row.get('title', '')} — {row.get('content', '')[:80]}")
-    except Exception as e:
-        print(f"央视新闻获取失败: {e}")
-    
-    # 兜底：如果两个源都失败，给一条提示
+        print(f"财联社获取失败: {e}")
+
     if not news_list:
-        news_list.append("今日新闻源暂时不可用，请检查数据接口。")
-    
+        news_list.append("今日暂无符合关键词的新闻。")
+
     return news_list
+def summarize_with_ai(news_list, api_key):
+    prompt = f"""你是一名专业A股策略分析师。以下是我筛选出的今日关键新闻，请整理成一份简洁的早报，包含：
+1. 宏观环境（美联储、国内政策等）
+2. 科技巨头动态（英伟达、美光等）
+3. 对A股可能的影响（利好/利空哪些板块）
+4. 今日风险提示
+
+新闻列表：
+{chr(10).join(news_list)}
+
+请用中文输出，每个板块不超过3条，语言精炼。"""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    data = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.5
+    }
+    resp = requests.post("https://api.deepseek.com/chat/completions", headers=headers, json=data)
+    return resp.json()["choices"][0]["message"]["content"]
 def build_html_report(news_list):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
     html_items = "".join(f"<li style='margin-bottom:10px;'>{item}</li>" for item in news_list)
@@ -64,31 +74,36 @@ def send_to_wechat(token, title, content):
 # ==========================================
 if __name__ == "__main__":
     try:
-        # 1. 获取新闻数据（注意这里改成了 get_finance_news）
+        # 1. 获取新闻数据
         print("正在获取宏观与科技新闻...")
         news_list = get_finance_news()
-        
-        # 2. 组装报告
+
+        # 2. 调用 AI 整理
+        print("正在调用AI整理...")
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("错误：未找到 DEEPSEEK_API_KEY 环境变量！")
+        summary = summarize_with_ai(news_list, api_key)
+
+        # 3. 组装报告（注意这里传的是 [summary]）
         print("正在生成报告...")
-        title = "今日关键信息链"
-        content = build_html_report(news_list)
-        
-        # 3. 从环境变量中读取 Token
-        token = os.environ.get("PUSHPLUS_TOKEN") 
-        
+        title = "今日财经内参"
+        content = build_html_report([summary])
+
+        # 4. 从环境变量中读取 Token
+        token = os.environ.get("PUSHPLUS_TOKEN")
         if not token:
             raise ValueError("错误：未找到 PUSHPLUS_TOKEN 环境变量！")
-            
+
         print("正在推送到微信...")
         send_to_wechat(token, title, content)
         print("执行完毕！")
-        
+
     except Exception as e:
-        # 如果出错，把错误信息也推送到微信
         import traceback
         error_msg = traceback.format_exc()
         print(error_msg)
-        
+
         token = os.environ.get("PUSHPLUS_TOKEN")
         if token:
             send_to_wechat(token, "⚠️ 脚本运行报错", f"<pre>{error_msg}</pre>")
