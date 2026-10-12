@@ -170,16 +170,42 @@ def get_market_fund_flow():
 
 
 def get_sector_fund_flow():
-    """行业板块资金流向排名（东方财富主源 → 同花顺备用源）"""
+    """行业板块资金流向排名（同花顺主源 → 东方财富备用源）"""
 
-    # ===== 主源：东方财富（修正参数 fs=m:90+t:3） =====
+    # ===== 主源：同花顺 =====
+    try:
+        df = ak.stock_fund_flow_industry(symbol="即时")
+        if df is not None and not df.empty:
+            print(f"同花顺行业资金流字段: {list(df.columns)}")
+            name_col = "行业" if "行业" in df.columns else df.columns[1]
+            net_col = "净额" if "净额" in df.columns else None
+
+            if net_col is None:
+                if "流入资金" in df.columns and "流出资金" in df.columns:
+                    df["_net"] = df["流入资金"] - df["流出资金"]
+                    net_col = "_net"
+                else:
+                    print("同花顺数据字段异常，无法解析")
+            else:
+                df_sorted = df.sort_values(net_col, ascending=False)
+                lines = ["【资金流入前5板块（同花顺）】"]
+                for _, row in df_sorted.head(5).iterrows():
+                    lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
+                lines.append("【资金流出前5板块（同花顺）】")
+                for _, row in df_sorted.tail(5).iterrows():
+                    lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
+                return "\n".join(lines)
+    except Exception as e:
+        print(f"同花顺板块资金流失败: {e}")
+
+    # ===== 备用源：东方财富 =====
     try:
         url = "https://push2.eastmoney.com/api/qt/clist/get"
         params = {
             "pn": "1", "pz": "100", "po": "1", "np": "1",
             "ut": "bd1d9ddb04089700cf9c27f6f7426281",
             "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90+t:3",  # 关键修正：t:2 → t:3，获取完整行业板块
+            "fs": "m:90+t:3",
             "fields": "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
         }
         resp = requests.get(url, params=params, timeout=15)
@@ -199,34 +225,6 @@ def get_sector_fund_flow():
             return "\n".join(lines)
     except Exception as e:
         print(f"东方财富板块资金流API失败: {e}")
-
-    # ===== 备用源：同花顺 =====
-    try:
-        df = ak.stock_fund_flow_industry(symbol="即时")
-        if df is not None and not df.empty:
-            print(f"同花顺行业资金流字段: {list(df.columns)}")
-            # 同花顺接口字段：序号, 行业, 行业指数, 行业-涨跌幅, 流入资金, 流出资金, 净额, 公司家数, 领涨股, 领涨股-涨跌幅, 当前价
-            name_col = "行业" if "行业" in df.columns else df.columns[1]
-            net_col = "净额" if "净额" in df.columns else None
-
-            if net_col is None:
-                # 如果净额列名不同，尝试从流入-流出计算
-                if "流入资金" in df.columns and "流出资金" in df.columns:
-                    df["_net"] = df["流入资金"] - df["流出资金"]
-                    net_col = "_net"
-                else:
-                    return "同花顺数据字段异常，无法解析"
-
-            df_sorted = df.sort_values(net_col, ascending=False)
-            lines = ["【资金流入前5板块（同花顺）】"]
-            for _, row in df_sorted.head(5).iterrows():
-                lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
-            lines.append("【资金流出前5板块（同花顺）】")
-            for _, row in df_sorted.tail(5).iterrows():
-                lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
-            return "\n".join(lines)
-    except Exception as e:
-        print(f"同花顺板块资金流失败: {e}")
 
     return "板块资金流向数据暂不可用"
 
