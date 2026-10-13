@@ -3,7 +3,7 @@ name: Daily Stock Report
 on:
   schedule:
     # 每天北京时间 08:30 运行 (UTC 00:30)
-    - cron: '30 0 * * *'
+    - cron: '27 0 * * *'
   workflow_dispatch:
 
 jobs:
