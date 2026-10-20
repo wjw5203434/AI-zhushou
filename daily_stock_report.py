@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import datetime
 import akshare as ak
@@ -6,16 +7,10 @@ import pandas as pd
 import requests
 
 # ==========================================
-# 工具函数：带重试的安全获取
-# ==========================================
-import sys
-import datetime
-import akshare as ak
-
-# ==========================================
-# 新增：判断今天是否为 A 股交易日
+# 一、工具与基础函数
 # ==========================================
 def is_trading_day():
+    """判断今天是否为 A 股交易日"""
     today_str = datetime.datetime.now().strftime('%Y-%m-%d')
     try:
         # 获取新浪财经的 A 股交易日历
@@ -27,18 +22,6 @@ def is_trading_day():
         # 如果接口失效，降级为判断是否为周一到周五
         return datetime.datetime.now().weekday() < 5
 
-# 在主程序入口处拦截
-if __name__ == "__main__":
-    if not is_trading_day():
-        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 不是 A 股交易日，系统自动跳过推送。")
-        sys.exit(0)  # 正常退出，GitHub Actions 会显示绿色成功，但不发微信
-
-    # ==========================================
-    # 下方是你原有的 try: 代码
-    # ==========================================
-    try:
-        print("=== 开始获取多维度数据 ===")
-        # ...
 def safe_fetch(name, func, default="暂无数据", retries=3, delay=8):
     """安全获取数据，支持重试"""
     for attempt in range(retries):
@@ -58,7 +41,7 @@ def safe_fetch(name, func, default="暂无数据", retries=3, delay=8):
 
 
 # ==========================================
-# 一、新闻抓取
+# 二、各维度数据抓取函数
 # ==========================================
 def get_finance_news():
     news_list = []
@@ -77,10 +60,6 @@ def get_finance_news():
         news_list.append("今日暂无符合关键词的新闻。")
     return news_list
 
-
-# ==========================================
-# 二、大盘指数数据（多接口降级，含成交量）
-# ==========================================
 def get_market_index():
     indices = {
         "上证指数": {"em": "000001", "sina": "sh000001", "tx": "sh000001"},
@@ -94,15 +73,12 @@ def get_market_index():
 
     for name, codes in indices.items():
         df = None
-
         # 方法1：东方财富
         try:
-            df = ak.index_zh_a_hist(symbol=codes["em"], period="daily",
-                                    start_date=start_date, end_date=end_date)
+            df = ak.index_zh_a_hist(symbol=codes["em"], period="daily", start_date=start_date, end_date=end_date)
             if df is not None and len(df) >= 2:
                 print(f"[OK] {name} 使用东财接口")
         except Exception as e:
-            print(f"[FAIL] {name} 东财接口失败: {e}")
             df = None
 
         # 方法2：新浪财经
@@ -113,9 +89,7 @@ def get_market_index():
                     df = df.rename(columns={"date": "日期", "close": "收盘", "volume": "成交量"})
                     df["涨跌幅"] = df["收盘"].pct_change() * 100
                     df["成交额"] = df.get("amount", df["成交量"])
-                    print(f"[OK] {name} 使用新浪接口")
             except Exception as e:
-                print(f"[FAIL] {name} 新浪接口失败: {e}")
                 df = None
 
         # 方法3：腾讯财经
@@ -125,16 +99,13 @@ def get_market_index():
                 if df is not None and len(df) >= 2:
                     df = df.rename(columns={"date": "日期", "close": "收盘", "amount": "成交额"})
                     df["涨跌幅"] = df["收盘"].pct_change() * 100
-                    print(f"[OK] {name} 使用腾讯接口")
             except Exception as e:
-                print(f"[FAIL] {name} 腾讯接口失败: {e}")
                 df = None
 
         # 解析
         if df is not None and len(df) >= 2:
             last = df.iloc[-1]
             prev = df.iloc[-2]
-
             date_str = str(last.get("日期", ""))[:10]
             close = last.get("收盘", "暂无")
             change = last.get("涨跌幅", "暂无")
@@ -146,8 +117,8 @@ def get_market_index():
 
             amount_yi = amount / 100000000 if amount else 0
             prev_amount_yi = prev_amount / 100000000 if prev_amount else 0
-
             diff = amount_yi - prev_amount_yi
+
             if diff > 0:
                 volume_status = f"较前日放量 {diff:.0f}亿"
             elif diff < 0:
@@ -155,38 +126,21 @@ def get_market_index():
             else:
                 volume_status = "较前日持平"
 
-            result_lines.append(
-                f"{name}（{date_str}）：收盘 {close}（{change:.2f}%），"
-                f"成交额 {amount_yi:.0f}亿，{volume_status}"
-            )
+            result_lines.append(f"{name}（{date_str}）：收盘 {close}（{change:.2f}%），成交额 {amount_yi:.0f}亿，{volume_status}")
         else:
             result_lines.append(f"{name}：所有接口均获取失败")
 
     return "\n".join(result_lines) if result_lines else "大盘指数获取失败"
 
-
-# ==========================================
-# 三、资金面数据（东方财富主源 + 同花顺备用源）
-# ==========================================
 def get_market_fund_flow():
-    """大盘资金流向（东方财富免费API直调，取最近3个交易日）"""
     url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
-    params = {
-        "secid": "1.000001",
-        "secid2": "0.399001",
-        "klt": "101",
-        "lmt": "0",
-        "fields1": "f1,f2,f3,f7",
-        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
-    }
+    params = {"secid": "1.000001", "secid2": "0.399001", "klt": "101", "lmt": "0", "fields1": "f1,f2,f3,f7", "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"}
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         klines = data.get("data", {}).get("klines", [])
-        if not klines:
-            return "大盘主力资金数据暂不可用"
-
+        if not klines: return "大盘主力资金数据暂不可用"
         lines = []
         for k in klines[-3:]:
             parts = k.split(",")
@@ -196,27 +150,18 @@ def get_market_fund_flow():
             lines.append(f"{date}：主力净{direction} {abs(main_net):.0f}亿")
         return "大盘主力资金流向（近3日）：\n" + "\n".join(lines)
     except Exception as e:
-        print(f"东方财富大盘资金流API失败: {e}")
         return "大盘主力资金数据暂不可用"
 
-
 def get_sector_fund_flow():
-    """行业板块资金流向排名（同花顺主源 → 东方财富备用源）"""
-
-    # ===== 主源：同花顺 =====
     try:
         df = ak.stock_fund_flow_industry(symbol="即时")
         if df is not None and not df.empty:
-            print(f"同花顺行业资金流字段: {list(df.columns)}")
             name_col = "行业" if "行业" in df.columns else df.columns[1]
             net_col = "净额" if "净额" in df.columns else None
-
             if net_col is None:
                 if "流入资金" in df.columns and "流出资金" in df.columns:
                     df["_net"] = df["流入资金"] - df["流出资金"]
                     net_col = "_net"
-                else:
-                    print("同花顺数据字段异常，无法解析")
             else:
                 df_sorted = df.sort_values(net_col, ascending=False)
                 lines = ["【资金流入前5板块（同花顺）】"]
@@ -227,23 +172,14 @@ def get_sector_fund_flow():
                     lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
                 return "\n".join(lines)
     except Exception as e:
-        print(f"同花顺板块资金流失败: {e}")
+        pass
 
-    # ===== 备用源：东方财富 =====
     try:
         url = "https://push2.eastmoney.com/api/qt/clist/get"
-        params = {
-            "pn": "1", "pz": "100", "po": "1", "np": "1",
-            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-            "fltt": "2", "invt": "2", "fid": "f62",
-            "fs": "m:90+t:3",
-            "fields": "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"
-        }
+        params = {"pn": "1", "pz": "100", "po": "1", "np": "1", "ut": "bd1d9ddb04089700cf9c27f6f7426281", "fltt": "2", "invt": "2", "fid": "f62", "fs": "m:90+t:3", "fields": "f12,f14,f2,f3,f62,f184,f66,f69,f72,f75,f78,f81,f84,f87"}
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
-        items = data.get("data", {}).get("diff", [])
-
+        items = resp.json().get("data", {}).get("diff", [])
         if items:
             df = pd.DataFrame(items)
             df_sorted = df.sort_values("f62", ascending=False)
@@ -254,14 +190,12 @@ def get_sector_fund_flow():
             for _, row in df_sorted.tail(5).iterrows():
                 lines.append(f"  {row.get('f14', '')}：{row.get('f62', 0) / 100000000:.1f}亿")
             return "\n".join(lines)
-    except Exception as e:
-        print(f"东方财富板块资金流API失败: {e}")
+    except Exception:
+        pass
 
     return "板块资金流向数据暂不可用"
 
-
 def get_margin_data():
-    """两融余额（上交所）"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         start = (datetime.datetime.now() - datetime.timedelta(days=10)).strftime('%Y%m%d')
@@ -270,9 +204,7 @@ def get_margin_data():
     except Exception as e:
         return f"两融数据获取失败: {e}"
 
-
 def get_lhb_data():
-    """龙虎榜机构净买入"""
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
         df = ak.stock_lhb_detail_em(start_date=today, end_date=today)
@@ -282,10 +214,6 @@ def get_lhb_data():
     except Exception as e:
         return f"龙虎榜获取失败: {e}"
 
-
-# ==========================================
-# 四、情绪面数据
-# ==========================================
 def get_zt_pool():
     try:
         today = datetime.datetime.now().strftime('%Y%m%d')
@@ -298,33 +226,22 @@ def get_zt_pool():
     except Exception as e:
         return f"涨跌停统计获取失败: {e}"
 
-
-# ==========================================
-# 五、宏观数据（取最新）
-# ==========================================
 def get_macro_data():
     result = []
     try:
         pmi = ak.macro_china_pmi()
         result.append(f"PMI最新: {pmi.iloc[0].to_dict() if len(pmi) > 0 else '暂无'}")
-    except:
-        result.append("PMI获取失败")
+    except: result.append("PMI获取失败")
     try:
         cpi = ak.macro_china_cpi()
         result.append(f"CPI最新: {cpi.iloc[0].to_dict() if len(cpi) > 0 else '暂无'}")
-    except:
-        result.append("CPI获取失败")
+    except: result.append("CPI获取失败")
     try:
         m2 = ak.macro_china_money_supply()
         result.append(f"M2最新: {m2.iloc[0].to_dict() if len(m2) > 0 else '暂无'}")
-    except:
-        result.append("M2获取失败")
+    except: result.append("M2获取失败")
     return "\n".join(result)
 
-
-# ==========================================
-# 六、大宗商品
-# ==========================================
 def get_commodity_data():
     try:
         df = ak.futures_global_spot_em()
@@ -336,12 +253,7 @@ def get_commodity_data():
     except Exception as e:
         return f"大宗商品获取失败: {e}"
 
-
-# ==========================================
-# 七、亚太与美股指数（多接口降级）
-# ==========================================
 def get_asia_pacific_index():
-    """日经225、韩国KOSPI"""
     try:
         df = ak.index_global_spot_em()
         name_col = next((c for c in ["名称", "指数名称", "name", "Name"] if c in df.columns), None)
@@ -354,8 +266,7 @@ def get_asia_pacific_index():
                 for _, row in targets.iterrows():
                     lines.append(f"{row[name_col]}: {row[price_col] if price_col else '暂无'}（{row[change_col] if change_col else '暂无'}%）")
                 return "（东财实时）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"index_global_spot_em 失败: {e}")
+    except Exception: pass
 
     try:
         import yfinance as yf
@@ -369,14 +280,11 @@ def get_asia_pacific_index():
                 lines.append(f"{name}（{data.index[-1].date()}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
         if lines:
             return "（yfinance）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"yfinance 亚太失败: {e}")
+    except Exception: pass
 
     return "亚太指数数据暂不可用"
 
-
 def get_us_index():
-    """美股三大指数：道指、纳指、标普500"""
     try:
         import yfinance as yf
         tickers = {"道琼斯": "^DJI", "纳斯达克": "^IXIC", "标普500": "^GSPC"}
@@ -389,8 +297,7 @@ def get_us_index():
                 lines.append(f"{name}（{data.index[-1].date()}）: 收盘 {latest['Close']:.2f}，涨跌幅 {change:.2f}%")
         if lines:
             return "（yfinance）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"yfinance 失败: {e}")
+    except Exception: pass
 
     try:
         df = ak.stock_us_spot_em()
@@ -403,8 +310,7 @@ def get_us_index():
                 lines = [f"{row[name_col]}: {row[price_col] if price_col else '暂无'}（{row[change_col] if change_col else '暂无'}%）" for _, row in targets.iterrows()]
                 if lines:
                     return "（东财实时）\n" + "\n".join(lines)
-    except Exception as e:
-        print(f"stock_us_spot_em 失败: {e}")
+    except Exception: pass
 
     try:
         df = ak.index_us_stock_sina()
@@ -419,15 +325,10 @@ def get_us_index():
             else:
                 change_str = "暂无"
             return f"（新浪标普500）\n标普500（{str(latest.get('date', ''))[:10]}）: 收盘 {close}，涨跌幅 {change_str}"
-    except Exception as e:
-        print(f"index_us_stock_sina 失败: {e}")
+    except Exception: pass
 
     return "美股指数数据暂不可用"
 
-
-# ==========================================
-# 八、机构预期
-# ==========================================
 def get_forecast_data():
     try:
         df = ak.stock_rank_forecast_cninfo(date=datetime.datetime.now().strftime('%Y%m%d'))
@@ -439,7 +340,7 @@ def get_forecast_data():
 
 
 # ==========================================
-# 九、AI 综合分析
+# 三、AI 综合分析 & 推送
 # ==========================================
 def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin, lhb,
                       zt_stats, macro, commodity, forecast,
@@ -519,10 +420,6 @@ def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin,
     content = content.replace("**", "").replace("```html", "").replace("```", "")
     return content
 
-
-# ==========================================
-# 十、HTML 报告模板
-# ==========================================
 def build_html_report(content):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
     html_content = f"""
@@ -540,10 +437,6 @@ def build_html_report(content):
     """
     return html_content
 
-
-# ==========================================
-# 十一、推送（支持群组）
-# ==========================================
 def send_to_wechat(token, title, content, topic=None):
     url = "http://www.pushplus.plus/send"
     data = {"token": token, "title": title, "content": content, "template": "html"}
@@ -554,9 +447,15 @@ def send_to_wechat(token, title, content, topic=None):
 
 
 # ==========================================
-# 主程序入口
+# 四、主程序入口（放在文件最底部）
 # ==========================================
 if __name__ == "__main__":
+    # 1. 拦截非交易日
+    if not is_trading_day():
+        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 不是 A 股交易日，系统自动跳过推送。")
+        sys.exit(0)
+
+    # 2. 正常交易日执行流程
     try:
         print("=== 开始获取多维度数据 ===")
 
