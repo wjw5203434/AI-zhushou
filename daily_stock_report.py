@@ -8,6 +8,37 @@ import requests
 # ==========================================
 # 工具函数：带重试的安全获取
 # ==========================================
+import sys
+import datetime
+import akshare as ak
+
+# ==========================================
+# 新增：判断今天是否为 A 股交易日
+# ==========================================
+def is_trading_day():
+    today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+    try:
+        # 获取新浪财经的 A 股交易日历
+        df = ak.tool_trade_date_hist_sina()
+        trade_dates = df['trade_date'].astype(str).tolist()
+        return today_str in trade_dates
+    except Exception as e:
+        print(f"获取交易日历失败: {e}")
+        # 如果接口失效，降级为判断是否为周一到周五
+        return datetime.datetime.now().weekday() < 5
+
+# 在主程序入口处拦截
+if __name__ == "__main__":
+    if not is_trading_day():
+        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 不是 A 股交易日，系统自动跳过推送。")
+        sys.exit(0)  # 正常退出，GitHub Actions 会显示绿色成功，但不发微信
+
+    # ==========================================
+    # 下方是你原有的 try: 代码
+    # ==========================================
+    try:
+        print("=== 开始获取多维度数据 ===")
+        # ...
 def safe_fetch(name, func, default="暂无数据", retries=3, delay=8):
     """安全获取数据，支持重试"""
     for attempt in range(retries):
