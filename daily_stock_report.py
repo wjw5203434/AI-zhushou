@@ -13,13 +13,11 @@ def is_trading_day():
     """判断今天是否为 A 股交易日"""
     today_str = datetime.datetime.now().strftime('%Y-%m-%d')
     try:
-        # 获取新浪财经的 A 股交易日历
         df = ak.tool_trade_date_hist_sina()
         trade_dates = df['trade_date'].astype(str).tolist()
         return today_str in trade_dates
     except Exception as e:
         print(f"获取交易日历失败: {e}")
-        # 如果接口失效，降级为判断是否为周一到周五
         return datetime.datetime.now().weekday() < 5
 
 def safe_fetch(name, func, default="暂无数据", retries=3, delay=8):
@@ -78,7 +76,7 @@ def get_market_index():
             df = ak.index_zh_a_hist(symbol=codes["em"], period="daily", start_date=start_date, end_date=end_date)
             if df is not None and len(df) >= 2:
                 print(f"[OK] {name} 使用东财接口")
-        except Exception as e:
+        except Exception:
             df = None
 
         # 方法2：新浪财经
@@ -89,7 +87,7 @@ def get_market_index():
                     df = df.rename(columns={"date": "日期", "close": "收盘", "volume": "成交量"})
                     df["涨跌幅"] = df["收盘"].pct_change() * 100
                     df["成交额"] = df.get("amount", df["成交量"])
-            except Exception as e:
+            except Exception:
                 df = None
 
         # 方法3：腾讯财经
@@ -99,7 +97,7 @@ def get_market_index():
                 if df is not None and len(df) >= 2:
                     df = df.rename(columns={"date": "日期", "close": "收盘", "amount": "成交额"})
                     df["涨跌幅"] = df["收盘"].pct_change() * 100
-            except Exception as e:
+            except Exception:
                 df = None
 
         # 解析
@@ -149,7 +147,7 @@ def get_market_fund_flow():
             direction = "流入" if main_net > 0 else "流出"
             lines.append(f"{date}：主力净{direction} {abs(main_net):.0f}亿")
         return "大盘主力资金流向（近3日）：\n" + "\n".join(lines)
-    except Exception as e:
+    except Exception:
         return "大盘主力资金数据暂不可用"
 
 def get_sector_fund_flow():
@@ -171,7 +169,7 @@ def get_sector_fund_flow():
                 for _, row in df_sorted.tail(5).iterrows():
                     lines.append(f"  {row[name_col]}：{row[net_col]:.1f}亿")
                 return "\n".join(lines)
-    except Exception as e:
+    except Exception:
         pass
 
     try:
@@ -340,12 +338,83 @@ def get_forecast_data():
 
 
 # ==========================================
-# 三、AI 综合分析 & 推送
+# 三、近期大事整理（新增模块）
+# ==========================================
+def get_fed_calendar():
+    """获取美联储近期议息会议日程"""
+    try:
+        fomc_dates = [
+            "2026-10-27/28",
+            "2026-12-08/09"
+        ]
+        today = datetime.datetime.now().date()
+        next_meeting_str = fomc_dates[0].split('/')[0]
+        next_meeting = datetime.datetime.strptime(next_meeting_str, "%Y-%m-%d").date()
+        days_until = (next_meeting - today).days
+        
+        if days_until >= 0:
+            return f"下一次美联储FOMC议息会议：{next_meeting_str}，距今 {days_until} 天。"
+        else:
+            return "近期美联储议息会议已过，请关注会议纪要发布。"
+    except Exception as e:
+        return f"获取美联储日程失败: {e}"
+
+def get_earnings_calendar(days=7):
+    """获取未来N天A股重点公司财报预约披露情况"""
+    try:
+        month = datetime.datetime.now().month
+        if month in [1, 2, 3, 4]:
+            report_date = "20260331"
+        elif month in [5, 6, 7, 8]:
+            report_date = "20260630"
+        elif month in [9, 10]:
+            report_date = "20260930"
+        else:
+            report_date = "20261231"
+            
+        df = ak.stock_yysj_em(date=report_date)
+        if df is None or df.empty:
+            return "近期暂无A股财报预约披露数据。"
+        
+        df['预约披露时间'] = pd.to_datetime(df['预约披露时间'])
+        today = pd.Timestamp.now().normalize()
+        future_date = today + pd.Timedelta(days=days)
+        
+        upcoming = df[(df['预约披露时间'] >= today) & (df['预约披露时间'] <= future_date)]
+        
+        if upcoming.empty:
+            return f"未来{days}天内无重要A股财报预约披露。"
+        
+        lines = [f"未来{days}天内的A股重点财报披露（部分）："]
+        for _, row in upcoming.head(10).iterrows():
+            lines.append(f"  - {row.get('股票简称', '')} ({row.get('股票代码', '')})：{row.get('预约披露时间', '').strftime('%Y-%m-%d')}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"获取A股财报日历失败: {e}"
+
+def get_key_economic_events():
+    """获取近期关键宏观数据发布日程"""
+    events = [
+        "每月10-15日：美国CPI / PPI 通胀数据发布期，关注对美联储降息预期的扰动。",
+        "每月首个周五（北京时间20:30/21:30）：美国非农就业数据（NFP），影响全球风险资产定价。",
+        "国内每月9-15日：中国CPI/PPI、社融及M2数据密集发布期，关注国内经济复苏成色。",
+        "国内每月底/月初：中国官方制造业PMI及财新PMI发布，观察荣枯线得失。"
+    ]
+    return "宏观关键节点提醒：\n" + "\n".join([f"  - {e}" for e in events])
+
+
+# ==========================================
+# 四、AI 综合分析
 # ==========================================
 def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin, lhb,
                       zt_stats, macro, commodity, forecast,
-                      asia_pacific, us_index, api_key):
+                      asia_pacific, us_index, fed_calendar, earnings_calendar, key_events, api_key):
     prompt = f"""你是一名专业A股策略分析师。以下是今日多维度市场数据，请整理成一份简洁的早报。
+
+【近期关键大事预警】
+美联储动态：{fed_calendar}
+A股财报披露：{earnings_calendar}
+宏观数据节点：{key_events}
 
 【大盘指数】
 {market_index}
@@ -401,7 +470,10 @@ def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin,
 3. 大盘资金流向、板块资金流向与涨跌停家数反映的A股内部情绪<br>
 注意：历史上A股与外围存在"非对称联动"——外围大跌时A股跟随概率高，外围大涨时A股未必同步走强。请据此给出审慎判断。如果某项数据缺失，请明确标注"数据缺失"并说明该缺失对判断的影响，不要强行给出结论。</p>
 
-<h3>七、⚠️ 今日风险提示</h3>
+<h3>七、⚠️ 近期大事预警（必看）</h3>
+<p>根据【近期关键大事预警】数据，提取未来3-7天内最需要关注的1-3件核心大事（如美联储议息、重磅财报、CPI发布等），并简要提示其对A股的可能影响。</p>
+
+<h3>八、⚠️ 今日风险提示</h3>
 <p>内容</p>
 
 要求：
@@ -420,6 +492,10 @@ def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin,
     content = content.replace("**", "").replace("```html", "").replace("```", "")
     return content
 
+
+# ==========================================
+# 五、HTML 渲染与推送
+# ==========================================
 def build_html_report(content):
     today = pd.Timestamp.now().strftime('%Y-%m-%d')
     html_content = f"""
@@ -447,7 +523,7 @@ def send_to_wechat(token, title, content, topic=None):
 
 
 # ==========================================
-# 四、主程序入口（放在文件最底部）
+# 六、主程序入口
 # ==========================================
 if __name__ == "__main__":
     # 1. 拦截非交易日
@@ -492,6 +568,11 @@ if __name__ == "__main__":
         print("正在获取美股指数...")
         us_index = safe_fetch("美股指数", get_us_index)
 
+        print("正在获取近期大事预警...")
+        fed_calendar = safe_fetch("美联储日程", get_fed_calendar)
+        earnings_calendar = safe_fetch("A股财报日历", get_earnings_calendar)
+        key_events = safe_fetch("宏观关键节点", get_key_economic_events)
+
         print("正在获取机构预期...")
         forecast = safe_fetch("机构预期", get_forecast_data)
 
@@ -499,9 +580,11 @@ if __name__ == "__main__":
         api_key = os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             raise ValueError("未找到 DEEPSEEK_API_KEY")
+        
+        # 传入新增的三个数据参数
         summary = summarize_with_ai(news_list, market_index, market_fund, sector_fund,
                                     margin, lhb, zt_stats, macro, commodity, forecast,
-                                    asia_pacific, us_index, api_key)
+                                    asia_pacific, us_index, fed_calendar, earnings_calendar, key_events, api_key)
 
         print("正在生成报告...")
         title = "今日财经内参"
