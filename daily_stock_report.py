@@ -268,31 +268,51 @@ def get_key_economic_events():
     return "宏观节点：\n  - 每月10-15日：美国CPI/PPI\n  - 每月首个周五：美国非农\n  - 每月9-15日：中国CPI/PPI/社融/M2\n  - 月底/月初：中国官方及财新PMI"
 
 def get_broad_etf_flow():
-        etf_list = {
+    """统计主要宽基ETF近5/10/30/60日累计净流入"""
+    etf_list = {
         "510300": "沪深300ETF",
         "510500": "中证500ETF",
         "159915": "创业板ETF",
         "510050": "上证50ETF",
         "588000": "科创50ETF",
-        "512100": "中证1000ETF",  # 新增：小盘风向标
-        "512050": "中证A500ETF"   # 新增：最新核心宽基
-        }
+        "512100": "中证1000ETF",
+        "512050": "中证A500ETF"
+    }
     res = []
     end = datetime.datetime.now().strftime('%Y%m%d')
     start = (datetime.datetime.now() - datetime.timedelta(days=120)).strftime('%Y%m%d')
+    
     for code, name in etf_list.items():
         try:
             df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start, end_date=end)
-            if df is None or df.empty: res.append(f"{name}：无数据"); continue
+            if df is None or df.empty:
+                res.append(f"{name}：无数据")
+                continue
+            
+            # 查找净流入字段
             flow_c = next((c for c in ["主力净流入-净额", "净流入", "主力净流入"] if c in df.columns), None)
             if flow_c is None:
-                res.append(f"{name}：当前接口无净流入字段"); continue
+                res.append(f"{name}：当前接口无净流入字段")
+                continue
+                
             df = df.sort_values("日期")
-            def sm(d): return df.tail(d)[flow_c].sum() / 1e8
-            f5, f10, f30, f60 = sm(5), sm(10), sm(30), sm(60)
-            fmt = lambda v: f"{'流入' if v>0 else '流出'}{abs(v):.1f}亿"
+            
+            def sum_flow(days):
+                return df.tail(days)[flow_c].sum() / 100000000
+                
+            f5 = sum_flow(5)
+            f10 = sum_flow(10)
+            f30 = sum_flow(30)
+            f60 = sum_flow(60)
+            
+            def fmt(v):
+                return f"{'流入' if v > 0 else '流出'}{abs(v):.1f}亿"
+                
             res.append(f"{name}：5日{fmt(f5)} | 10日{fmt(f10)} | 30日{fmt(f30)} | 60日{fmt(f60)}")
-        except Exception as e: res.append(f"{name}：获取失败 - {e}")
+            
+        except Exception as e:
+            res.append(f"{name}：获取失败 - {e}")
+            
     return "\n".join(res) if res else "宽基ETF流向暂不可用"
 
 
