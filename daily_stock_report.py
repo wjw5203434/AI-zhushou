@@ -270,7 +270,7 @@ def get_key_economic_events():
     return "宏观节点：\n  - 每月10-15日：美国CPI/PPI\n  - 每月首个周五：美国非农\n  - 每月9-15日：中国CPI/PPI/社融/M2\n  - 月底/月初：中国官方及财新PMI"
 
 def get_broad_etf_flow():
-    """基于量价关系统计宽基ETF趋势（100%稳定，无需任何特殊数据源）"""
+    """基于量价关系统计宽基ETF趋势（东财+新浪双接口降级，防封杀）"""
     etf_list = {
         "510300": "沪深300ETF",
         "510500": "中证500ETF",
@@ -285,45 +285,78 @@ def get_broad_etf_flow():
     start = (datetime.datetime.now() - datetime.timedelta(days=120)).strftime('%Y%m%d')
     
     for code, name in etf_list.items():
+        df = None
+        err_msg = ""
+        
+        # 方案一：优先尝试东方财富接口
         try:
             df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start, end_date=end)
-            if df is None or df.empty:
-                res.append(f"{name}：无数据")
-                continue
-            
-            df = df.sort_values("日期")
-            if "涨跌幅" not in df.columns or "成交额" not in df.columns:
-                res.append(f"{name}：数据缺失")
-                continue
-
-            def calc_trend(days):
-                recent = df.tail(days)
-                if recent.empty: return "无数据"
-                
-                total_chg = recent["涨跌幅"].sum()
-                avg_vol = recent["成交额"].mean() / 100000000
-                
-                if total_chg < -3 and avg_vol > 5:
-                    status = "放量下跌(资金流出)"
-                elif total_chg < -3:
-                    status = "缩量阴跌(抛压减轻)"
-                elif total_chg > 3 and avg_vol > 5:
-                    status = "放量上涨(资金流入)"
-                elif total_chg > 3:
-                    status = "缩量上涨(动能不足)"
-                else:
-                    status = "震荡"
-                return f"{total_chg:+.1f}%/{avg_vol:.0f}亿({status})"
-
-            t5 = calc_trend(5)
-            t10 = calc_trend(10)
-            t30 = calc_trend(30)
-            t60 = calc_trend(60)
-            
-            res.append(f"{name}：5日[{t5}] | 10日[{t10}] | 30日[{t30}] | 60日[{t60}]")
-            
+            if df is not None and not df.empty:
+                print(f"[OK] {name} 使用东财接口")
+            else:
+                df = None
         except Exception as e:
-            res.append(f"{name}：获取失败")
+            err_msg += f"东财失败:{e}; "
+            df = None
+            
+        # 方案二：降级使用新浪接口
+        if df is None:
+            try:
+                # 新浪的代码需要带前缀：上交所是 sh，深交所是 sz
+                prefix = "sh" if code.startswith("5") else "sz"
+                sina_code = f"{prefix}{code}"
+                df_sina = ak.fund_etf_hist_sina(symbol=sina_code)
+                
+                if df_sina is not None and not df_sina.empty:
+                    # 新浪数据重命名并补齐缺失列
+                    df = df_sina.rename(columns={"date": "日期", "close": "收盘", "volume": "成交量"})
+                    df["涨跌幅"] = df["收盘"].pct_change() * 100
+                    # 新浪没有成交额，用 收盘价 * 成交量 粗略估算，单位转为元
+                    df["成交额"] = df["收盘"] * df["成交量"] 
+                    print(f"[OK] {name} 使用新浪接口")
+                else:
+                    df = None
+            except Exception as e:
+                err_msg += f"新浪失败:{e}"
+                df = None
+
+        # 如果两个接口都拿不到数据
+        if df is None or df.empty:
+            res.append(f"{name}：数据获取失败({err_msg})")
+            continue
+            
+        df = df.sort_values("日期")
+        # 只保留最近120天的数据即可
+        df = df.tail(120)
+
+        # 核心计算逻辑
+        def calc_trend(days):
+            recent = df.tail(days)
+            if recent.empty: return "无数据"
+            
+            total_chg = recent["涨跌幅"].sum()
+            # 统一换算成亿元
+            avg_vol = recent["成交额"].mean() / 100000000
+            
+            # 放量与缩量的判定阈值（日均成交额>1亿算活跃，<1亿算缩量）
+            if total_chg < -3 and avg_vol > 1:
+                status = "放量下跌(资金流出)"
+            elif total_chg < -3:
+                status = "缩量阴跌(抛压减轻)"
+            elif total_chg > 3 and avg_vol > 1:
+                status = "放量上涨(资金流入)"
+            elif total_chg > 3:
+                status = "缩量上涨(动能不足)"
+            else:
+                status = "震荡"
+            return f"{total_chg:+.1f}%/{avg_vol:.1f}亿({status})"
+
+        t5 = calc_trend(5)
+        t10 = calc_trend(10)
+        t30 = calc_trend(30)
+        t60 = calc_trend(60)
+        
+        res.append(f"{name}：5日[{t5}] | 10日[{t10}] | 30日[{t30}] | 60日[{t60}]")
             
     return "\n".join(res) if res else "宽基ETF流向暂不可用"
 
