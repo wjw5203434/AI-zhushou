@@ -382,7 +382,7 @@ def summarize_with_ai(news_list, market_index, market_fund, sector_fund, margin,
                       zt_stats, macro, commodity, forecast,
                       asia_pacific, us_index, fed_calendar, earnings_calendar, key_events,
                       etf_flow, api_key):
-    prompt = f"""你是一名极度厌恶风险的A股资深策略分析师。以下是今日多维度市场数据，请整理成一份简洁的早报。
+    prompt = f"""你是一名嗅觉敏锐、善于抓住机会又沉着冷静的A股资深策略分析师。以下是今日多维度市场数据，请整理成一份简洁的早报。
 
 【近期关键大事预警】
 美联储动态：{fed_calendar}
@@ -510,9 +510,9 @@ def send_to_wechat(token, title, content, topic=None):
 # 五、主程序入口
 # ==========================================
 if __name__ == "__main__":
-#    if not is_trading_day():
-#        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
-#        sys.exit(0)
+    if not is_trading_day():
+        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
+        sys.exit(0)
 
     try:
         print("=== 开始获取多维度数据 ===")
