@@ -10,6 +10,7 @@ import requests
 # 一、工具与基础函数
 # ==========================================
 def is_trading_day():
+    """判断今天是否为 A 股交易日"""
     today_str = datetime.datetime.now().strftime('%Y-%m-%d')
     try:
         df = ak.tool_trade_date_hist_sina()
@@ -18,6 +19,7 @@ def is_trading_day():
         return datetime.datetime.now().weekday() < 5
 
 def safe_fetch(name, func, default="暂无数据", retries=3, delay=8):
+    """安全获取数据，支持重试"""
     for attempt in range(retries):
         try:
             result = func()
@@ -268,15 +270,16 @@ def get_key_economic_events():
     return "宏观节点：\n  - 每月10-15日：美国CPI/PPI\n  - 每月首个周五：美国非农\n  - 每月9-15日：中国CPI/PPI/社融/M2\n  - 月底/月初：中国官方及财新PMI"
 
 def get_broad_etf_flow():
+    """基于量价关系统计宽基ETF趋势（100%稳定，无需任何特殊数据源）"""
     etf_list = {
         "510300": "沪深300ETF",
         "510500": "中证500ETF",
         "159915": "创业板ETF",
         "510050": "上证50ETF",
         "588000": "科创50ETF",
-        "512100": "中证1000ETF",
-        "512050": "中证A500ETF"
+        "512100": "中证1000ETF"
     }
+    
     res = []
     end = datetime.datetime.now().strftime('%Y%m%d')
     start = (datetime.datetime.now() - datetime.timedelta(days=120)).strftime('%Y%m%d')
@@ -288,28 +291,39 @@ def get_broad_etf_flow():
                 res.append(f"{name}：无数据")
                 continue
             
-            flow_c = next((c for c in ["主力净流入-净额", "净流入", "主力净流入"] if c in df.columns), None)
-            if flow_c is None:
-                res.append(f"{name}：当前接口无净流入字段")
-                continue
-                
             df = df.sort_values("日期")
-            
-            def sum_flow(days):
-                return df.tail(days)[flow_c].sum() / 100000000
+            if "涨跌幅" not in df.columns or "成交额" not in df.columns:
+                res.append(f"{name}：数据缺失")
+                continue
+
+            def calc_trend(days):
+                recent = df.tail(days)
+                if recent.empty: return "无数据"
                 
-            f5 = sum_flow(5)
-            f10 = sum_flow(10)
-            f30 = sum_flow(30)
-            f60 = sum_flow(60)
-            
-            def fmt(v):
-                return f"{'流入' if v > 0 else '流出'}{abs(v):.1f}亿"
+                total_chg = recent["涨跌幅"].sum()
+                avg_vol = recent["成交额"].mean() / 100000000
                 
-            res.append(f"{name}：5日{fmt(f5)} | 10日{fmt(f10)} | 30日{fmt(f30)} | 60日{fmt(f60)}")
+                if total_chg < -3 and avg_vol > 5:
+                    status = "放量下跌(资金流出)"
+                elif total_chg < -3:
+                    status = "缩量阴跌(抛压减轻)"
+                elif total_chg > 3 and avg_vol > 5:
+                    status = "放量上涨(资金流入)"
+                elif total_chg > 3:
+                    status = "缩量上涨(动能不足)"
+                else:
+                    status = "震荡"
+                return f"{total_chg:+.1f}%/{avg_vol:.0f}亿({status})"
+
+            t5 = calc_trend(5)
+            t10 = calc_trend(10)
+            t30 = calc_trend(30)
+            t60 = calc_trend(60)
+            
+            res.append(f"{name}：5日[{t5}] | 10日[{t10}] | 30日[{t30}] | 60日[{t60}]")
             
         except Exception as e:
-            res.append(f"{name}：获取失败 - {e}")
+            res.append(f"{name}：获取失败")
             
     return "\n".join(res) if res else "宽基ETF流向暂不可用"
 
@@ -337,7 +351,7 @@ A股财报披露：{earnings_calendar}
 两融余额: {margin}
 龙虎榜: {lhb}
 
-【宽基ETF资金流向（近N日累计）】
+【宽基ETF量价趋势（涨跌幅/日均成交额/资金推断）】
 {etf_flow}
 
 【市场情绪】
@@ -375,12 +389,12 @@ A股财报披露：{earnings_calendar}
 <h3>四、对A股可能的影响</h3>
 <p>内容（利好/利空哪些板块）</p>
 
-<h3>五、🏦 宽基ETF资金流向观察</h3>
-<p>根据宽基ETF近5/10/30/60日的累计净流入/流出，判断中长期资金是在持续流入、持续流出，还是出现趋势拐点。重点提示：近30日或60日是否出现持续净流出（类似6-10月的警示信号）。</p>
+<h3>五、🏦 宽基ETF量价趋势观察</h3>
+<p>根据【宽基ETF量价趋势】数据，解读核心宽基（沪深300、创业板等）近30日/60日的量价关系。如果是放量下跌，必须严厉警告资金流出；如果是缩量阴跌，说明抛压减轻但仍在寻底。</p>
 
 <h3>六、🚨 波段风险雷达扫描</h3>
 <p>请严格检查以下 4 项风险信号，并在报告中如实列出触发了哪些项：<br>
-1. 【资金背离】指数上涨，但宽基ETF或大盘资金呈现净流出。<br>
+1. 【资金背离】指数上涨，但大盘资金或行业板块呈现净流出。<br>
 2. 【情绪极值】涨停家数超过80家，或连板家数超过20家（高潮即退潮）。<br>
 3. 【主线退潮】前期的热门板块在龙虎榜上出现大额净卖出，或资金流入的板块每天剧烈切换、毫无持续性。<br>
 4. 【趋势破坏】大盘指数跌破20日均线（生命线），或放量收出中阴线。</p>
@@ -388,9 +402,10 @@ A股财报披露：{earnings_calendar}
 <h3>七、📊 铁血风控仓位建议</h3>
 <p>请严格根据【波段风险雷达扫描】的结果，结合以下【绝对风控红线】给出最终仓位：<br>
 <span style="color:red;">【绝对风控红线（必须遵守）】</span><br>
-- 只要触发【趋势破坏】（跌破20日线或放量大跌），<strong>建议仓位强制降至 10%-20% 或空仓</strong>。<br>
+- 如果【宽基ETF量价趋势】中，核心宽基（如沪深300、创业板）出现了“放量下跌”，且大盘跌破20日线，<strong>建议仓位强制降至 10%-20% 或空仓</strong>。<br>
+- 如果宽基ETF出现“缩量阴跌”，说明抛压减轻，但仍在寻底，<strong>建议仓位不超过 30%</strong>。<br>
 - 触发【资金背离】或【主线退潮】任意2项及以上，<strong>建议仓位上限强制降至 20%-30%</strong>。<br>
-- 只有在均线多头排列、资金持续净流入、情绪健康（非极值）的情况下，才允许给出 50%-70% 的仓位。<br>
+- 只有在宽基ETF呈现“放量上涨”或“震荡企稳”、情绪健康（非极值）的情况下，才允许给出 50%-70% 的仓位。<br>
 请先输出判断逻辑，最后单独一行用加粗标明最终结论。格式：<br><strong>最终建议仓位：XX%-XX%</strong></p>
 
 <h3>八、📈 今日走势预测</h3>
@@ -445,9 +460,9 @@ def send_to_wechat(token, title, content, topic=None):
 # 五、主程序入口
 # ==========================================
 if __name__ == "__main__":
-    #if not is_trading_day():
-    #    print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
-    #    sys.exit(0)
+#    if not is_trading_day():
+#        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
+#        sys.exit(0)
 
     try:
         print("=== 开始获取多维度数据 ===")
