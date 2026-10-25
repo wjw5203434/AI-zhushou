@@ -445,9 +445,9 @@ def send_to_wechat(token, title, content, topic=None):
 # 五、主程序入口
 # ==========================================
 if __name__ == "__main__":
-    if not is_trading_day():
-        print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
-        sys.exit(0)
+    #if not is_trading_day():
+    #    print(f"今天 ({datetime.datetime.now().strftime('%Y-%m-%d')}) 非交易日，跳过推送。")
+    #    sys.exit(0)
 
     try:
         print("=== 开始获取多维度数据 ===")
